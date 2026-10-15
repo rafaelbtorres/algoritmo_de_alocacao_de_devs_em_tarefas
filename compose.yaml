@@ -32,6 +32,8 @@ services:
     environment:
       PMA_HOST: db
       PMA_PORT: 3306
+      PMA_USER: ${DB_USER:-alocacao}
+      PMA_PASSWORD: ${DB_PASSWORD:?Execute bash start.sh primeiro}
       UPLOAD_LIMIT: 1G
       MEMORY_LIMIT: 512M
       MAX_EXECUTION_TIME: 3600
@@ -65,7 +67,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    environment: *app_environment
+    environment:
+      <<: *app_environment
+      PHPMYADMIN_PORT: ${PHPMYADMIN_PORT:-8081}
     ports:
       - "${WEB_HOST:-127.0.0.1}:${WEB_PORT:-8000}:8000"
     volumes:

@@ -125,8 +125,14 @@ coreutils pelo gerenciador de pacotes utilizado no computador.
 ### Acesso ao banco
 
 Por padrão, acesse **http://localhost:8081** para abrir o phpMyAdmin.
-Use o usuário definido em `DB_USER` e a senha `DB_PASSWORD` do `.env`.
-Para administração completa, use `root` e `MYSQL_ROOT_PASSWORD`.
+O botão **Abrir phpMyAdmin** na interface web abre o painel já conectado,
+usando `DB_USER` e `DB_PASSWORD` do `.env`. As credenciais são configuradas
+no container do phpMyAdmin, sem enviá-las no link ou no HTML da aplicação.
+O login automático usa `PMA_USER` e `PMA_PASSWORD`, conforme a
+[documentação da imagem oficial](https://github.com/phpmyadmin/docker).
+Para voltar ao formulário de login e acessar como `root`, remova essas duas
+variáveis do serviço `phpmyadmin` no `compose.yaml` e execute a opção 1
+novamente. Então use `root` e `MYSQL_ROOT_PASSWORD`.
 O MySQL fica disponível para ferramentas locais em **127.0.0.1:3308**.
 Dentro dos containers, o endereço do banco é `db:3306`.
 As portas publicadas são acessíveis somente pelo próprio computador.

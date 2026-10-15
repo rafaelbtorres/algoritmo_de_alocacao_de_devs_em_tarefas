@@ -1,7 +1,9 @@
 """API e interface do laboratorio. Execute com gunicorn web.app:app."""
 import json
+import os
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, render_template, request
 from pymysql import MySQLError
@@ -39,7 +41,11 @@ def dataset(config):
 
 @app.get('/')
 def index():
-    return render_template('index.html')
+    host = urlsplit(request.host_url).hostname
+    if ':' in host:
+        host = f'[{host}]'
+    port = int(os.environ.get('PHPMYADMIN_PORT', '8081'))
+    return render_template('index.html', phpmyadmin_url=f'http://{host}:{port}/')
 
 
 @app.get('/api/health')
