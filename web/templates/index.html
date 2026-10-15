@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#153b30">
+  <title>Matching Lab · Alocação de desenvolvedores</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a href="#" class="brand" aria-label="Matching Lab, início"><span class="brand-icon">m<span>↗</span></span><span>matching<span class="brand-light">lab</span></span></a>
+    <p class="side-caption">ALGORITMOS EM PRÁTICA</p>
+    <nav aria-label="Navegação"><a href="#laboratorio" class="nav-link active"><span>⌘</span> Laboratório <small>01</small></a><a href="#dados" class="nav-link"><span>▤</span> Explorar dados <small>02</small></a><a href="#resultados" class="nav-link"><span>◷</span> Resultados <small>03</small></a></nav>
+    <div class="side-note"><span class="mini-label">COMO FUNCIONA</span><p>Pessoas de um lado.<br>Tarefas do outro.<br><strong>Conexões que fazem sentido.</strong></p><span class="tiny-line"></span><p class="muted-small">Explore um grafo bipartido e acompanhe cada decisão do matching.</p></div>
+    <div class="side-bottom"><span class="status-dot" id="db-dot"></span><span id="db-status">Conectando ao banco…</span><span class="version">v1.0</span></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>Pesquisa operacional <span class="breadcrumb">/</span> Laboratório de alocação</span><span class="local-badge">◉ Ambiente local</span></header>
+    <div class="page-content">
+      <section class="page-heading" id="laboratorio"><div><p class="eyebrow">DE UM PROBLEMA A UMA CONEXÃO</p><h1>Encontre o próximo par<span>.</span></h1><p class="subtitle">Configure, acompanhe e entenda a alocação de desenvolvedores em tarefas.</p></div><button id="reload" class="button secondary">↻ Atualizar dados</button></section>
+      <div id="message" role="status" aria-live="polite" hidden></div>
+      <section class="stats" aria-label="Resumo do dataset">
+        <div class="stat"><span class="stat-icon">♧</span><div><span class="stat-label">Desenvolvedores</span><strong id="dev-count">—</strong></div><small>Presentes no recorte</small></div>
+        <div class="stat"><span class="stat-icon">▤</span><div><span class="stat-label">Tarefas</span><strong id="task-count">—</strong></div><small>Importadas do TAWOS</small></div>
+        <div class="stat"><span class="stat-icon">▦</span><div><span class="stat-label">Sprints</span><strong id="sprint-count">—</strong></div><small>No conjunto selecionado</small></div>
+        <div class="stat accent"><span class="stat-icon">↗</span><div><span class="stat-label">Alocações</span><strong id="pair-count">0</strong></div><small>Um dev · uma tarefa</small></div>
+      </section>
+      <div class="workspace">
+        <section class="panel config-panel" aria-labelledby="config-title">
+          <div class="panel-title"><h2 id="config-title">Configure o cenário</h2><span class="step-tag">01</span></div>
+          <p class="panel-description">Escolha os dados e as regras para conectar os dois grupos.</p>
+          <label class="field-label" for="direction">Sentido da alocação</label><select id="direction"><option value="devs_para_tarefas">Desenvolvedores → Tarefas</option><option value="tarefas_para_devs">Tarefas → Desenvolvedores</option></select><p id="direction-hint" class="direction-hint">A busca começa por cada desenvolvedor.</p>
+          <label class="field-label" for="project">Projeto</label><select id="project"><option value="">Todos os projetos</option></select>
+          <label class="field-label" for="sprint">Sprint</label><select id="sprint"><option value="">Todas as sprints</option></select>
+          <div class="participant-limits"><div><label class="field-label" for="dev-limit">Quantidade de devs</label><input type="number" id="dev-limit" min="1" max="200" step="1" placeholder="Todos"></div><div><label class="field-label" for="task-limit">Quantidade de tarefas</label><input type="number" id="task-limit" min="1" max="500" step="1" placeholder="Todas"></div></div><p class="selection-hint">Em branco: todos os registros do filtro. Seleciona os primeiros IDs, antes de aplicar os critérios. Um dev recebe no máximo uma tarefa.</p>
+          <div class="divider"></div><div class="criteria-heading"><h3>Critérios de compatibilidade</h3><span id="criteria-count" class="pill">0 ativos</span></div>
+          <label class="switch-row"><span><strong>Mesmo projeto</strong><small>Dev e tarefa pertencem ao mesmo projeto.</small></span><input type="checkbox" id="same-project" role="switch"></label>
+          <label class="switch-row"><span><strong>Disponibilidade</strong><small>Considerar apenas devs disponíveis.</small></span><input type="checkbox" id="availability" role="switch"></label>
+          <label class="switch-row"><span><strong>Habilidades</strong><small>Combinar requisitos e conhecimentos.</small></span><input type="checkbox" id="skills" role="switch"></label>
+          <label class="field-label" for="points">Limite de story points por tarefa <span>opcional</span></label><input type="number" id="points" min="0" step="0.5" placeholder="Sem limite">
+          <div class="config-note">↳ Sem critérios ativos, qualquer par pode ser formado. O limite é de uma tarefa por dev nesta execução.</div>
+          <details class="manual-data"><summary>Dados de habilidades e disponibilidade</summary><p>O TAWOS não contém esses dados. Preencha-os nas tabelas abaixo, na aba Desenvolvedores e nas habilidades de cada tarefa.</p></details>
+          <button id="save-config" class="button secondary full">Salvar critérios</button><small class="save-hint">Salva em config/critérios.json</small>
+        </section>
+        <section class="panel graph-panel" aria-labelledby="graph-title">
+          <div class="graph-heading"><div><div class="eyebrow">VEJA A LÓGICA ACONTECER</div><h2 id="graph-title">Uma conexão de cada vez</h2></div><span id="run-status" class="pill">Pronto para começar</span></div>
+          <div class="legend"><span><svg class="legend-icon dev" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="3"/><path d="M6 19v-2a6 6 0 0 1 12 0v2"/></svg> Desenvolvedor</span><span><svg class="legend-icon task" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7Z"/><path d="M14 3v4h4M10 11h5M10 14h5M10 17h3"/></svg> Tarefa</span><span><i class="legend-line"></i> Par formado</span></div>
+          <p class="graph-hint">Role dentro do grafo para explorar todos os nós.</p><div class="graph-wrap" id="graph-wrap"><svg id="graph" role="img" aria-label="Grafo bipartido de desenvolvedores e tarefas" viewBox="0 0 760 460"></svg><div class="graph-empty" id="graph-empty">Carregando os dados do banco…</div></div>
+          <div class="explanation" aria-live="polite"><span class="explain-symbol">↳</span><div><span id="step-label">O PONTO DE PARTIDA</span><p id="step-text">Inicie a alocação para acompanhar a busca por pares válidos.</p></div><span id="progress-count">0 / 0</span></div>
+          <div class="progress-track"><div id="progress-bar"></div></div>
+          <div class="play-controls"><div class="primary-controls"><button class="button primary" id="start" disabled>▶ Iniciar alocação</button><button class="icon-button" id="next" disabled title="Avançar um passo" aria-label="Avançar um passo">⏭</button><button class="icon-button" id="reset" disabled title="Reiniciar visualização" aria-label="Reiniciar visualização">↺</button></div><label class="speed-label" for="speed">Velocidade <select id="speed"><option value="1200">Lenta</option><option value="450" selected>Normal</option><option value="80">Rápida</option><option value="5">Muito rápida</option></select></label></div>
+          <p class="animation-note">A animação reproduz os passos reais da busca. Pausas e velocidade não alteram o tempo de processamento medido.</p>
+        </section>
+      </div>
+      <section class="panel data-panel" id="dados"><div class="section-heading"><div><p class="eyebrow">CONHEÇA O SEU CENÁRIO</p><h2>Dados que alimentam as conexões</h2></div><span class="source-badge">TAWOS · MySQL</span></div><div class="data-toolbar"><div class="tabs" role="tablist" aria-label="Dados"><button id="tasks-tab" role="tab" aria-selected="true" class="tab active">Tarefas <span id="tasks-tab-count">0</span></button><button id="devs-tab" role="tab" aria-selected="false" class="tab">Desenvolvedores <span id="devs-tab-count">0</span></button></div><label class="search-label"><span>⌕</span><input id="search" type="search" placeholder="Buscar por título ou ID…" aria-label="Buscar dados"></label></div><div class="bulk-row"><span>Complemente os critérios manualmente, se necessário.</span><button id="fill-manual" class="button secondary">Declarar tarefas sem requisitos</button></div><div class="table-scroll"><table id="data-table"><thead></thead><tbody></tbody></table></div><div class="table-footer"><span id="table-count">0 registros</span><span>Dados manuais são usados apenas nos critérios desta simulação.</span></div></section>
+      <section class="panel results-panel" id="resultados"><div class="section-heading"><div><p class="eyebrow">DO PROCESSO AO RESULTADO</p><h2>O que a alocação nos conta</h2></div><button class="button secondary" id="download" disabled>↓ Baixar resultado JSON</button></div><div id="results-empty" class="results-empty">Execute a alocação para visualizar os gráficos e as métricas.</div><div id="results-content" hidden><div class="result-stats"><div><span>Pares formados</span><strong id="result-pairs">—</strong></div><div><span>Tarefas sem dev</span><strong id="result-unmatched">—</strong></div><div><span>Matching real</span><strong id="result-time">—</strong></div><div><span>Pares avaliados na busca</span><strong id="result-edges">—</strong></div></div><div class="charts"><figure><figcaption>Distribuição das tarefas <span>Alocadas × sem desenvolvedor</span></figcaption><div id="distribution-chart"></div></figure><figure><figcaption>Tempo de processamento <span>Milissegundos · medição no servidor</span></figcaption><div id="time-chart"></div></figure></div><div class="results-explanation" id="results-explanation"></div><div class="allocation-list" id="allocation-list"></div></div></section>
+      <footer>Matching Lab <span>Um laboratório para explorar o problema de alocação.</span><a href="#laboratorio">Voltar ao início ↑</a></footer>
+    </div>
+  </main>
+</body>
+</html>

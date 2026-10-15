@@ -1,0 +1,81 @@
+name: alocacao-devs
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Execute bash start.sh primeiro}
+      MYSQL_DATABASE: ${DB_NAME:-alocacao}
+      MYSQL_USER: ${DB_USER:-alocacao}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Execute bash start.sh primeiro}
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3308}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: ["--max-allowed-packet=512M", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql --protocol=TCP -h 127.0.0.1 -u \"$$MYSQL_USER\" \"$$MYSQL_DATABASE\" -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  phpmyadmin:
+    image: phpmyadmin:5.2-apache
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${PHPMYADMIN_PORT:-8081}:80"
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 1G
+      MEMORY_LIMIT: 512M
+      MAX_EXECUTION_TIME: 3600
+
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    working_dir: /workspace
+    command: ["sleep", "infinity"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: &app_environment
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-alocacao}
+      DB_USER: ${DB_USER:-alocacao}
+      DB_PASSWORD: ${DB_PASSWORD:?Execute bash start.sh primeiro}
+      PYTHONDONTWRITEBYTECODE: 1
+      PYTHONUNBUFFERED: 1
+    volumes:
+      - .:/workspace
+
+  web:
+    build: .
+    restart: unless-stopped
+    init: true
+    working_dir: /workspace
+    command: ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "web.app:app"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *app_environment
+    ports:
+      - "${WEB_HOST:-127.0.0.1}:${WEB_PORT:-8000}:8000"
+    volumes:
+      - .:/workspace
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  mysql_data:

@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+backups/*
+!backups/.gitkeep
+tests/*
+*.sql
+*.sql.gz
+# Dataset pequeno usado no desenvolvimento; original continua fora do Git.
+!datasets/TAWOS_reduzido.sql
+resultados/

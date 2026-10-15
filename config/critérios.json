@@ -1,0 +1,15 @@
+{
+  "criterios": {
+    "disponibilidade": false,
+    "habilidades": false,
+    "max_story_points_por_tarefa": null,
+    "mesmo_projeto": false
+  },
+  "dados_devs": {},
+  "direcao": "devs_para_tarefas",
+  "habilidades_tarefas": {},
+  "projeto_id": null,
+  "quantidade_devs": null,
+  "quantidade_tarefas": null,
+  "sprint_id": null
+}
