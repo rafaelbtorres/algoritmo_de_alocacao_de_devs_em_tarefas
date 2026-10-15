@@ -8,7 +8,7 @@ import sys
 from pymysql import MySQLError
 
 from app.db import connect
-from app.matching import allocate, validate_config
+from app.matching import allocate, select_participants, validate_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,7 +52,7 @@ def load_data(config, limit=None):
                 params.append(task_limit)
             cursor.execute(query, params)
             tasks = cursor.fetchall()
-    return developers, tasks
+    return select_participants(developers, tasks, config)
 
 
 def save_result(result, output):

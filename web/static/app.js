@@ -24,11 +24,14 @@ function populateSprints(selected = '') {
 }
 function setBusy(busy) {
   state.busy = busy;
-  document.querySelectorAll('.config-panel input,.config-panel select,#data-table input,#data-table select,#save-config,#reload,#fill-manual').forEach(el => el.disabled = busy);
+  document.querySelectorAll('.config-panel input,.config-panel select,#data-table input,#data-table select,#save-config,#reload,#fill-manual,#shuffle-order,#restore-order').forEach(el => el.disabled = busy);
   $('fill-manual').disabled = busy || !(state.tab === 'tasks' ? state.tasks.length : state.devs.length);
   updateControls();
 }
 function updateControls() {
+  $('shuffle-order').disabled = state.busy || (state.devs.length < 2 && state.tasks.length < 2);
+  $('restore-order').disabled = state.busy || state.config.semente_embaralhamento == null;
+  $('order-status').textContent = state.config.semente_embaralhamento == null ? 'Ordem por ID' : 'Ordem embaralhada';
   $('start').disabled = state.busy || !state.devs.length || !state.tasks.length;
   $('start').textContent = state.busy ? 'Carregando…' : state.playing ? 'Ⅱ Pausar' : state.result ? (state.index >= state.result.passos.length ? '↺ Reproduzir novamente' : '▶ Continuar') : '▶ Iniciar alocação';
   $('next').disabled = state.busy || !state.result || state.index >= state.result.passos.length;
@@ -168,6 +171,32 @@ async function startRun() {
     setBusy(false); play();
   } catch (error) { message(error.message, true); setBusy(false); }
 }
+function renderAllocationTimeline(result) {
+  const width = 840, height = 275, margin = {left:65, right:25, top:25, bottom:55};
+  const plotWidth = width - margin.left - margin.right, plotHeight = height - margin.top - margin.bottom;
+  const points = [{time:0, count:0}];
+  for (const step of result.passos) {
+    if (step.tipo === 'alocar') points.push({time:step.tempo_ms, count:step.pares.length});
+  }
+  const finalCount = points.at(-1).count;
+  const duration = Math.max(result.metricas.matching_ms, result.passos.at(-1)?.tempo_ms || 0, points.at(-1).time, .000001);
+  const maxCount = Math.max(finalCount, 1);
+  const x = value => margin.left + plotWidth * value / duration;
+  const y = value => margin.top + plotHeight * (1 - value / maxCount);
+  const timeText = value => value.toLocaleString('pt-BR', {maximumFractionDigits:duration < .01 ? 6 : 3});
+  let path = `M ${x(0)} ${y(0)}`;
+  for (const point of points.slice(1)) path += ` H ${x(point.time)} V ${y(point.count)}`;
+  path += ` H ${x(duration)}`;
+  let axes = '';
+  const interval = Math.max(1, Math.ceil(maxCount / 5));
+  const ticks = new Set([0, maxCount]);
+  for (let tick = interval; tick < maxCount; tick += interval) ticks.add(tick);
+  for (const tick of [...ticks].sort((a,b) => a-b)) axes += `<line class="timeline-grid" x1="${x(0)}" y1="${y(tick)}" x2="${x(duration)}" y2="${y(tick)}"/><text class="timeline-tick" x="${margin.left - 12}" y="${y(tick) + 4}" text-anchor="end">${tick}</text>`;
+  for (let tick = 0; tick <= 5; tick++) axes += `<text class="timeline-tick" x="${x(duration * tick / 5)}" y="${height - margin.bottom + 21}" text-anchor="middle">${timeText(duration * tick / 5)}</text>`;
+  const markers = points.map(point => `<circle class="timeline-point" cx="${x(point.time)}" cy="${y(point.count)}" r="4" tabindex="0" role="img" data-time-ms="${point.time}" data-allocations="${point.count}" aria-label="${point.count} alocações em ${timeText(point.time)} milissegundos"><title>${point.count} alocações · ${timeText(point.time)} ms</title></circle>`).join('');
+  $('allocation-timeline').innerHTML = `<div class="timeline-scroll"><svg class="timeline-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Evolução das alocações pelo tempo real do matching"><title>Tempo e quantidade acumulada de alocações</title><desc>${finalCount} pares formados em ${timeText(duration)} milissegundos de busca. O tempo de animação não faz parte deste gráfico.</desc>${axes}<path class="timeline-area" d="${path} L ${x(duration)} ${y(0)} Z"/><path class="timeline-line" d="${path}"/>${markers}<text class="timeline-axis-label" x="${margin.left + plotWidth / 2}" y="${height - 8}" text-anchor="middle">Tempo da busca (ms)</text><text class="timeline-axis-label" transform="translate(17 ${margin.top + plotHeight / 2}) rotate(-90)" text-anchor="middle">Alocações acumuladas</text></svg></div><div class="timeline-summary">${finalCount} pares ao final de ${timeText(duration)} ms de busca.</div>`;
+}
+
 function finish() {
   pause(); state.active = null; state.pairs = state.result.alocacoes;
   $('run-status').textContent = 'Concluído'; $('download').disabled = false;
@@ -180,6 +209,7 @@ function finish() {
   const times = [['Leitura do banco', m.leitura_ms], ['Preparação do grafo', m.preparacao_ms], ['Busca de matching', m.matching_ms]];
   const max = Math.max(...times.map(t => t[1]), .001);
   $('time-chart').innerHTML = '<div class="time-bars">' + times.map(([label, value]) => `<div class="time-row"><div><span>${label}</span><span>${number(value)} ms</span></div><div class="bar-track"><div class="bar-fill" style="width:${100 * value / max}%"></div></div></div>`).join('') + '</div>';
+  renderAllocationTimeline(r);
   const wallSeconds = (performance.now() - state.started) / 1000;
   const reverse = r.direcao === 'tarefas_para_devs';
   $('results-explanation').textContent = `Sentido: ${reverse ? 'tarefas → desenvolvedores' : 'desenvolvedores → tarefas'}. ${count} pares formados entre ${r.total_devs} devs e ${r.total_tarefas} tarefas. ${r.devs_sem_tarefa.length} devs ficaram sem tarefa. ${m.arestas_validas} de ${m.arestas_possiveis} pares são compatíveis com os critérios. Tempo do algoritmo: ${number(m.total_ms)} ms; reprodução visual: ${number(wallSeconds)} s (inclui pausas). O limite é de uma tarefa por dev no conjunto selecionado. As atribuições históricas do banco foram preservadas.`;
@@ -199,6 +229,16 @@ $('dev-limit').addEventListener('change', loadData);
 $('task-limit').addEventListener('change', loadData);
 for (const id of ['same-project','availability','skills','points']) $(id).addEventListener('change', () => { clearRun(); updateCriteriaCount(); renderGraph(); renderTable(); });
 $('reload').addEventListener('click', loadData);
+$('shuffle-order').addEventListener('click', () => {
+  let seed = crypto.getRandomValues(new Uint32Array(1))[0];
+  if (seed === state.config.semente_embaralhamento) seed = (seed + 1) % 4294967296;
+  state.config.semente_embaralhamento = seed;
+  loadData();
+});
+$('restore-order').addEventListener('click', () => {
+  state.config.semente_embaralhamento = null;
+  loadData();
+});
 $('search').addEventListener('input', renderTable);
 $('tasks-tab').addEventListener('click', () => { state.tab = 'tasks'; renderTable(); });
 $('devs-tab').addEventListener('click', () => { state.tab = 'devs'; renderTable(); });

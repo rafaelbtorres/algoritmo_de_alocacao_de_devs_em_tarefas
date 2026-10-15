@@ -1,5 +1,6 @@
 """Matching bipartido: no maximo uma tarefa por dev e um dev por tarefa."""
 import math
+import random
 from collections import deque
 from time import perf_counter
 
@@ -15,6 +16,9 @@ def validate_config(config):
         value = config.get(key)
         if value is not None and (type(value) is not int or value < 1):
             raise ValueError(f'{key} deve ser um inteiro positivo ou null.')
+    seed = config.get('semente_embaralhamento')
+    if seed is not None and (type(seed) is not int or not 0 <= seed <= 4294967295):
+        raise ValueError('semente_embaralhamento deve ser um inteiro entre 0 e 4294967295 ou null.')
     criteria = config.get('criterios', {})
     if not isinstance(criteria, dict):
         raise ValueError('criterios deve ser um objeto JSON.')
@@ -98,10 +102,16 @@ def matching_with_steps(graph, left, capture=False):
 
 
 def select_participants(developers, tasks, config):
-    """Escolhe ate N registros por grupo, em ordem de ID, antes da compatibilidade."""
+    """Seleciona os primeiros IDs e, opcionalmente, embaralha a ordem desse recorte."""
     validate_config(config)
-    return (sorted(developers, key=lambda dev: dev['ID'])[:config.get('quantidade_devs')],
-            sorted(tasks, key=lambda task: task['ID'])[:config.get('quantidade_tarefas')])
+    developers = sorted(developers, key=lambda dev: dev['ID'])[:config.get('quantidade_devs')]
+    tasks = sorted(tasks, key=lambda task: task['ID'])[:config.get('quantidade_tarefas')]
+    seed = config.get('semente_embaralhamento')
+    if seed is not None:
+        generator = random.Random(seed)
+        generator.shuffle(developers)
+        generator.shuffle(tasks)
+    return developers, tasks
 
 
 def allocate(developers, tasks, config, trace=False):
@@ -129,12 +139,12 @@ def allocate(developers, tasks, config, trace=False):
         for tid in issues:
             requirements[tid] = skill_set(config.get('habilidades_tarefas', {}).get(str(tid)), f'habilidades_tarefas.{tid}')
     graph = nx.Graph()
-    left = [('dev', uid) for uid in sorted(devs)]
+    left = [('dev', uid) for uid in devs]
     graph.add_nodes_from(left, bipartite=0)
-    graph.add_nodes_from((('tarefa', tid) for tid in sorted(issues)), bipartite=1)
+    graph.add_nodes_from((('tarefa', tid) for tid in issues), bipartite=1)
     limit = criteria.get('max_story_points_por_tarefa')
-    for uid in sorted(devs):
-        for tid in sorted(issues):
+    for uid in devs:
+        for tid in issues:
             dev, task = devs[uid], issues[tid]
             if criteria.get('mesmo_projeto') and (
                 dev.get('Project_ID') is None or dev.get('Project_ID') != task.get('Project_ID')
@@ -148,7 +158,7 @@ def allocate(developers, tasks, config, trace=False):
                 continue
             graph.add_edge(('dev', uid), ('tarefa', tid))
     direction = config.get('direcao', 'devs_para_tarefas')
-    origins = left if direction == 'devs_para_tarefas' else [('tarefa', tid) for tid in sorted(issues)]
+    origins = left if direction == 'devs_para_tarefas' else [('tarefa', tid) for tid in issues]
     graph_finished = perf_counter()
     matches, events, checked = matching_with_steps(graph, origins, capture=trace)
     matching_finished = perf_counter()
@@ -171,6 +181,9 @@ def allocate(developers, tasks, config, trace=False):
         'total_devs': len(devs), 'total_tarefas': len(issues),
         'quantidade_devs': config.get('quantidade_devs'),
         'quantidade_tarefas': config.get('quantidade_tarefas'),
+        'semente_embaralhamento': config.get('semente_embaralhamento'),
+        'ordem_devs': list(devs),
+        'ordem_tarefas': list(issues),
         'direcao': direction,
         'criterios': criteria,
         'passos': events,

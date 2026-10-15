@@ -20,7 +20,7 @@ SQL -  https://ndownloader.figshare.com/files/37806375
 ## Ambiente Docker e menu interativo
 
 O ambiente inclui MySQL 8.4, phpMyAdmin e Python 3.12 com PyMySQL,
-NumPy, pandas, SciPy, NetworkX e pytest. O algoritmo em `app/matching.py` associa desenvolvedores a tarefas por matching
+NumPy, pandas, SciPy, NetworkX, Flask e Gunicorn. O algoritmo em `app/matching.py` associa desenvolvedores a tarefas por matching
 bipartido. A configuração inicial não aplica critérios de compatibilidade.
 
 Use Bash e Docker Engine com Compose v2+ (ou Docker Desktop). Não é
@@ -43,15 +43,15 @@ precisa de internet e pode demorar para baixar imagens e dependências.
 | Opção | Ação |
 | --- | --- |
 | 1 | Iniciar ou atualizar os containers, incluindo a interface web |
-| 2 | Executar a alocação, mostrar os resultados e rodar os testes |
-| 3 | Banco de dados: importar/restaurar SQL, fazer backup ou ver acesso ao phpMyAdmin |
+| 2 | Executar a alocação e mostrar os resultados |
+| 3 | Banco de dados: importar um dataset SQL ou ver acesso ao phpMyAdmin |
 | 4 | Encerrar os containers e a rede, preservando o banco |
 | 5 | Analisar dependências e configuração do ambiente |
 | 6 | Mostrar IP, porta e endereço da interface web |
 | 0 | Sair do menu, mantendo o estado dos containers |
 
-A opção 3 abre um menu com apenas três ações: **1 — Importar SQL ou restaurar
-backup**, **2 — Fazer backup** e **3 — Ver acesso ao phpMyAdmin**. Use 0 para
+A opção 3 abre um menu com duas ações: **1 — Importar dataset SQL** e
+**2 — Ver acesso ao phpMyAdmin**. Use 0 para
 voltar. Para reiniciar o ambiente, escolha 4 e depois 1.
 
 ### Interface visual — Matching Lab
@@ -67,6 +67,7 @@ Na página, você pode:
 - Escolher o sentido: desenvolvedores → tarefas ou tarefas → desenvolvedores.
 - Selecionar projeto/sprint, limitar quantos devs e tarefas participam e explorar
   o recorte do banco antes de executar.
+- Embaralhar a ordem inicial dos participantes ou restaurar a ordem por ID.
 - Ativar critérios, definir o limite de story points e preencher habilidades
   e disponibilidade nas tabelas. Esses dados manuais complementam a simulação.
 - Salvar os critérios no mesmo `config/critérios.json` usado pela linha de comando.
@@ -74,6 +75,8 @@ Na página, você pode:
   sua velocidade. A cada alocação, o grafo mostra os pares atuais.
 - Ver a distribuição de tarefas alocadas/sem dev, tempos de leitura do banco,
   preparação do grafo e matching, além de baixar o resultado em JSON.
+- Acompanhar no gráfico de linhas a quantidade acumulada de alocações em
+  função do tempo real da busca, com um marcador por novo par formado.
 
 A execução é calculada no servidor e registra as buscas, arestas avaliadas
 e caminhos aumentantes realmente usados. A página reproduz esse registro:
@@ -146,8 +149,8 @@ e tabelas auxiliares de vínculos ficam sem registros nesse recorte.
 O recorte não representa a carga completa das sprints originais.
 
 O arquivo completo fica preservado em `datasets/original/TAWOS.sql`.
-O menu lista os arquivos `.sql` e `.sql.gz` diretamente em `datasets/`, além
-dos arquivos de `backups/`; subpastas como `original/` ficam fora da lista.
+O menu lista os arquivos `.sql` e `.sql.gz` diretamente em `datasets/`;
+subpastas como `original/` ficam fora da lista.
 A importação é feita pelo menu, inclusive quando o banco é novo. Escolha
 **3 → 1** e selecione o número de `TAWOS_reduzido.sql`.
 Para importar pelo caminho, você também pode escolher **I** e informar:
@@ -156,21 +159,8 @@ Para importar pelo caminho, você também pode escolher **I** e informar:
 datasets/TAWOS_reduzido.sql
 ```
 
-A importação substitui as tabelas TAWOS do banco selecionado; o menu gera
-um backup preventivo. Ela não apaga outras tabelas que já existirem no banco.
-
-Para gerar outro recorte, sem importar os 4 GB no MySQL, use Python 3.10+
-ou o Python do container (não requer bibliotecas adicionais):
-
-```bash
-docker compose exec app python scripts/reduzir_tawos.py datasets/original/TAWOS.sql datasets/TAWOS_outro_recorte.sql --tarefas-por-sprint 10
-```
-
-O gerador escolhe um projeto com duas sprints que tenham a quantidade
-solicitada de tarefas estimadas e com responsável. Ele verifica as chaves
-estrangeiras antes de escrever e não sobrescreve um arquivo de saída existente.
-Habilidades e disponibilidade dos desenvolvedores ainda precisam ser
-modeladas para as regras de alocação, pois não estão na tabela `User` original.
+A importação substitui as tabelas TAWOS do banco selecionado, após a
+confirmação `IMPORTAR`. Ela não apaga outras tabelas que já existirem no banco.
 
 ### Dataset ampliado — aproximadamente 5 MB
 
@@ -198,8 +188,7 @@ As 13 tabelas mantêm a estrutura do original; as demais tabelas auxiliares
 ficam vazias. As referências são verificadas antes de gerar o arquivo.
 
 Para usar, escolha **3 → 1** no menu e selecione pelo número o arquivo
-**`datasets/TAWOS_ampliado.sql`**. Ele substitui o recorte atual no banco;
-o menu cria backup antes. `TAWOS_reduzido.sql` continua disponível para voltar
+**`datasets/TAWOS_ampliado.sql`**. Ele substitui o recorte atual no banco após confirmação. `TAWOS_reduzido.sql` continua disponível para voltar
 aos testes pequenos. Depois de importar, clique em **Atualizar dados** na web.
 
 O recorte cabe nos limites atuais da interface (200 usuários e 480 tarefas).
@@ -207,23 +196,13 @@ Para acompanhar a animação com mais clareza, filtre um projeto ou uma sprint;
 cada uma das 12 sprints contém 40 tarefas. Os comentários e históricos
 servem de contexto e não entram na compatibilidade do matching atual.
 
-Para reproduzir esse arquivo ou gerar outro tamanho:
-
-```bash
-docker compose exec app python -m scripts.criar_dataset_ampliado datasets/original/TAWOS.sql datasets/TAWOS_novo.sql --projetos 3 --sprints-por-projeto 4 --tarefas-por-sprint 40 --tamanho-mb 5
-```
-
-O gerador não sobrescreve arquivos existentes. O tamanho é aproximado e só
-inclui contexto disponível das tarefas escolhidas; a quantidade de tarefas
-é definida pelos parâmetros, independentemente dos MB desejados.
-
 ### Importar seu SQL / dataset TAWOS
 
-Escolha **3 — Banco de dados**, depois **1 — Importar SQL ou restaurar backup**,
-e selecione o **número do arquivo** listado. A lista inclui os datasets de
-`datasets/` e os backups de `backups/`. Para um arquivo SQL externo,
+Escolha **3 — Banco de dados**, depois **1 — Importar dataset SQL**,
+e selecione o **número do arquivo** listado. A lista inclui os arquivos de
+`datasets/`. Para um arquivo SQL externo,
 escolha **I — Importar outro arquivo SQL** e informe o caminho. Use 0 ou Enter
-para cancelar a seleção. Se não houver arquivos nessas pastas, o menu informa isso e mantém
+para cancelar a seleção. Se não houver arquivos nessa pasta, o menu informa isso e mantém
 a opção de importar um arquivo externo. Caminhos relativos são
 resolvidos em relação à pasta do projeto; espaços são aceitos, sem envolver
 o caminho em aspas. Também pode importar pela aba **Importar** do phpMyAdmin
@@ -244,38 +223,26 @@ GRANT ALL PRIVILEGES ON `nome_do_banco`.* TO 'alocacao'@'%';
 O arquivo SQL não é reescrito automaticamente. Dumps de outros bancos, como
 PostgreSQL ou SQL Server, precisam ser convertidos para MySQL. Erros de
 compatibilidade em dumps antigos aparecem no terminal; uma importação pode
-aplicar parte do SQL antes de falhar. Consulte o banco e, se necessário,
-restaure o backup gerado antes da operação.
+aplicar parte do SQL antes de falhar. Consulte o banco e corrija o arquivo antes de repetir a importação.
 
 Para adicionar outros datasets à lista, coloque os arquivos `.sql` ou
 `.sql.gz` diretamente em `datasets/` e abra novamente a seleção de arquivos.
 A pasta não é importada automaticamente na inicialização do banco.
 
-### Backup e persistência
+### Persistência do banco
 
 Os dados ficam no volume Docker `mysql_data` do projeto Compose
 `alocacao-devs`. Encerrar pela opção 4 preserva esse volume. O menu não oferece
-exclusão permanente do banco. Os arquivos de backup em `backups/` também
-permanecem no computador.
+exclusão permanente do banco. A importação executa o SQL no banco selecionado,
+usando o nome indicado no próprio arquivo quando houver `USE`, e exige digitar
+`IMPORTAR` antes de começar.
 
-O backup é um dump SQL do **banco configurado em `DB_NAME`**, com estrutura,
-dados, rotinas, triggers e eventos. Não inclui outros bancos, usuários ou
-permissões globais. Se um dump importar vários bancos, faça backups de cada
-banco relevante antes da importação. Evite mudanças de estrutura durante o
-backup; a consistência de `--single-transaction` pressupõe tabelas InnoDB.
-Backups e dumps adicionais não são versionados; o dataset reduzido é incluído no projeto. Mantenha também uma cópia
-em outro local para proteção contra perda do computador.
-
-A restauração executa o dump sobre o servidor existente, usando o banco
-indicado no próprio arquivo quando houver `USE`. Não remove automaticamente
-tabelas extras que não estiverem no dump. Tanto a importação quanto a restauração
-exigem digitar `IMPORTAR`; se o backup prévio falhar, a operação é interrompida.
-Arquivos `.sql.gz` são descompactados em arquivo temporário e verificados antes
-de executar SQL; reserve espaço em disco para o conteúdo descompactado.
+Arquivos `.sql.gz` são descompactados e verificados em arquivo temporário
+antes de executar SQL; reserve espaço para o conteúdo descompactado.
 
 ### Executar a alocação e editar os critérios
 
-No menu `bash start.sh`, escolha **2 — Executar alocação e testes**. A aplicação
+No menu `bash start.sh`, escolha **2 — Executar alocação**. A aplicação
 lê `User` e `Issue`, calcula os pares e grava a proposta em
 `resultados/alocacao.json`, substituindo o resultado da execução anterior.
 Ela não altera `Issue.Assignee_ID`: esse campo é o responsável histórico do
@@ -295,6 +262,7 @@ containers. `null` deixa um filtro/limite desativado; `false` desativa um crité
 | Variável | Comportamento quando configurada |
 | --- | --- |
 | `direcao` | `devs_para_tarefas` inicia a busca pelos devs; `tarefas_para_devs` inicia pelas tarefas |
+| `semente_embaralhamento` | `null` usa ordem por ID; um inteiro de 0 a 4294967295 reproduz uma ordem embaralhada |
 | `quantidade_devs` | Seleciona até N desenvolvedores; `null` usa todos os disponíveis no filtro |
 | `quantidade_tarefas` | Seleciona até N tarefas; `null` usa todas as disponíveis no filtro |
 | `projeto_id` | Seleciona usuários e tarefas de um projeto |
@@ -318,6 +286,18 @@ as outras tarefas do recorte ficam sem dev. O limite de participantes não é
 uma garantia de alocações quando os critérios impedem alguns pares. Esses
 campos também são respeitados na execução pelo menu 2 e na saída JSON.
 
+O botão **Embaralhar ordem** cria uma nova ordem para os dois grupos, atualiza
+o grafo e as tabelas e limpa a execução anterior. Os participantes escolhidos
+pelos filtros e quantidades continuam os mesmos. A busca realmente usa essa
+ordem, inclusive ao avaliar os vizinhos de cada nó; não se trata apenas de
+uma mudança visual. Os pares e os passos podem mudar quando há empates,
+mas a cardinalidade máxima continua a mesma para o mesmo grafo.
+
+Use **Restaurar ordem por ID** para desfazer. **Salvar critérios** guarda a
+semente de embaralhamento no mesmo JSON de configuração; a opção 2 do menu
+também a respeita. O resultado registra a semente e as listas `ordem_devs`
+e `ordem_tarefas` para identificar a ordem utilizada. O banco não é alterado.
+
 Na interface, o campo **Sentido da alocação** muda o grupo que inicia a
 busca e coloca esse grupo à esquerda do grafo. As mensagens, os pares exibidos
 e o JSON registram o sentido escolhido. A escolha também pode ser salva em
@@ -331,8 +311,9 @@ de empate podem mudar.
 
 Todos os critérios estão inicialmente desativados. Não há pesos ou preferência
 entre pares: o algoritmo busca a maior quantidade de pares válidos. A busca
-percorre desenvolvedores e tarefas em ordem de ID para reproduzir o mesmo
-resultado com os mesmos dados e critérios.
+percorre os grupos na ordem exibida no grafo: por ID, ou embaralhada quando
+essa opção estiver ativa. Os mesmos dados, critérios e semente reproduzem a
+mesma ordem e o mesmo resultado no ambiente atual.
 
 Como o TAWOS não informa habilidades nem disponibilidade, ao ativar esses
 critérios preencha os dados manualmente para todos os devs/tarefas selecionados.
@@ -352,21 +333,20 @@ docker compose exec app python -m app.main
 
 A implementação constrói um grafo bipartido com NetworkX e usa busca em
 largura por caminhos aumentantes para obter o matching de cardinalidade
-máxima. A mesma função atende a linha de comando e a interface. Os testes
-comparam sua cardinalidade com a implementação de referência do
-[NetworkX](https://networkx.org/documentation/stable/_modules/networkx/algorithms/bipartite/matching.html).
+máxima. A mesma função atende a linha de comando e a interface, usando a
+representação de grafo do [NetworkX](https://networkx.org/documentation/stable/reference/algorithms/bipartite.html).
 
-### Desenvolver e testar
+### Desenvolvimento local
 
 A pasta do projeto é montada em `/workspace` no container Python. Mudanças em
-`app/`, `web/` e `tests/` ficam disponíveis no volume; alterações nas dependências
+`app/` e `web/` ficam disponíveis no volume; alterações nas dependências
 em `requirements.txt` exigem reconstruir pela opção 1. Alterações no Python
 da API ou nos templates HTML exigem reiniciar o serviço
 (`docker compose restart web`); alterações em CSS/JS aparecem ao atualizar
 a página.
 Use `app/db.py` para obter uma conexão configurada pelas variáveis de ambiente.
-A opção 2 executa a alocação em `app/main.py` e os testes, incluindo conexão
-e leitura/escrita em uma tabela temporária, sem alterar as tabelas do dataset.
+A opção 2 executa a alocação em `app/main.py` e salva a proposta em JSON,
+sem alterar as tabelas do dataset.
 Para executar manualmente outros comandos de desenvolvimento, use:
 
 ```bash
@@ -374,16 +354,10 @@ docker compose exec app python -m app.main
 docker compose exec app sh
 ```
 
-Os testes das proteções
-do menu shell também podem ser executados em um computador que já tenha Python,
-sem Docker ou bibliotecas adicionais:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-Nesse comando local, o teste de banco é ignorado por padrão. Os testes de matching verificam exclusividade dos pares, quantidade máxima
-de alocações, ausência de candidatos e funcionamento dos critérios opcionais.
+Testes podem ser criados localmente em `tests/`, mas essa pasta é ignorada
+pelo Git e pelo build Docker. A aplicação não depende dela para construir
+as imagens, iniciar o ambiente ou executar o algoritmo. Nenhum pacote de
+testes é instalado nas dependências da aplicação.
 
 Se aparecer erro de acesso ao Docker, confirme que o serviço está iniciado e
 que seu usuário tem permissão para acessá-lo. Em Linux, após uma alteração

@@ -1,15 +1,16 @@
 {
   "criterios": {
+    "mesmo_projeto": false,
     "disponibilidade": false,
     "habilidades": false,
-    "max_story_points_por_tarefa": null,
-    "mesmo_projeto": false
+    "max_story_points_por_tarefa": null
   },
   "dados_devs": {},
   "direcao": "devs_para_tarefas",
   "habilidades_tarefas": {},
   "projeto_id": null,
-  "quantidade_devs": null,
-  "quantidade_tarefas": null,
-  "sprint_id": null
+  "quantidade_devs": 20,
+  "quantidade_tarefas": 47,
+  "sprint_id": null,
+  "semente_embaralhamento": null
 }

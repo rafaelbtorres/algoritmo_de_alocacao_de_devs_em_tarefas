@@ -3,9 +3,7 @@
 set -o pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P) || exit 1
 ENV_FILE="$ROOT/.env"
-BACKUPS="$ROOT/backups"
 MYSQL_IMPORT='export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysql -uroot --default-character-set=utf8mb4 --binary-mode=1 "$MYSQL_DATABASE"'
-MYSQL_BACKUP='export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mysqldump -uroot --single-transaction --quick --routines --triggers --events --hex-blob --no-tablespaces --set-gtid-purged=OFF --databases "$MYSQL_DATABASE"'
 
 compose() {
     docker compose --project-directory "$ROOT" --env-file "$ENV_FILE" -f "$ROOT/compose.yaml" "$@"
@@ -13,7 +11,7 @@ compose() {
 
 check_tools() {
     local tool missing=0
-    for tool in docker dirname od tr mktemp mkdir mv rm date cat gzip; do
+    for tool in docker dirname od tr mktemp mkdir rm cat gzip; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             printf '[FALTA] %s\n' "$tool"
             missing=1
@@ -40,7 +38,7 @@ analyze() {
     local failures=0 help_text tool
     echo '=== Analise do ambiente ==='
     printf '[OK] Bash %s\n' "$BASH_VERSION"
-    for tool in dirname od tr mktemp mkdir mv rm date cat gzip; do
+    for tool in dirname od tr mktemp mkdir rm cat gzip; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '[OK] %s\n' "$tool"
         else
@@ -71,7 +69,7 @@ analyze() {
         echo '[FALTA] Instale Docker Engine com Compose v2+ ou Docker Desktop.'
         failures=$((failures + 1))
     fi
-    for tool in compose.yaml Dockerfile requirements.txt .env.example config/critérios.json app/main.py app/db.py app/matching.py web/app.py web/templates/index.html web/static/app.js tests/test_environment.py; do
+    for tool in compose.yaml Dockerfile requirements.txt .env.example config/critérios.json app/main.py app/db.py app/matching.py web/app.py web/templates/index.html web/static/app.js web/static/style.css; do
         if [[ -r "$ROOT/$tool" ]]; then
             printf '[OK] Arquivo %s\n' "$tool"
         else
@@ -79,11 +77,11 @@ analyze() {
             failures=$((failures + 1))
         fi
     done
-    if [[ ! -w "$ROOT" || ( -d "$BACKUPS" && ! -w "$BACKUPS" ) ]]; then
-        echo '[ERRO] Sem permissao de escrita no projeto ou em backups/.'
+    if [[ ! -w "$ROOT" ]]; then
+        echo '[ERRO] Sem permissao de escrita no projeto.'
         failures=$((failures + 1))
     else
-        echo '[OK] Permissao para criar configuracao e backups'
+        echo '[OK] Permissao para criar configuracao e resultados'
     fi
     if [[ -f "$ENV_FILE" ]]; then
         if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
@@ -147,20 +145,6 @@ access() {
     echo 'Senhas em .env. Para dumps que criam outros bancos, use root.'
 }
 
-backup() (
-    local temporary target
-    mkdir -p -- "$BACKUPS" || return 1
-    umask 077
-    temporary=$(mktemp "$BACKUPS/backup_$(date +%Y%m%d_%H%M%S)_XXXXXX.sql.part") || return 1
-    trap 'rm -f -- "$temporary"' EXIT
-    trap 'exit 130' INT
-    trap 'exit 143' TERM
-    target=${temporary%.part}
-    compose exec -T db sh -c "$MYSQL_BACKUP" > "$temporary" || return 1
-    mv -- "$temporary" "$target" || return 1
-    printf 'Backup criado: %s\n' "$target"
-)
-
 import_sql() (
     local path="${1:-}" confirmation unpacked=''
     if [[ -z "$path" ]]; then
@@ -173,9 +157,8 @@ import_sql() (
     [[ -f "$path" && -r "$path" ]] || { echo 'Arquivo inexistente ou sem permissao de leitura.'; return 1; }
     echo 'O SQL sera executado como root e pode substituir dados ou criar bancos.'
     echo 'Um erro SQL pode deixar comandos parcialmente aplicados.'
-    read -r -p 'Digite IMPORTAR para confirmar (sera feito backup antes): ' confirmation || return 1
+    read -r -p 'Digite IMPORTAR para confirmar: ' confirmation || return 1
     [[ "$confirmation" == IMPORTAR ]] || { echo 'Operacao cancelada.'; return 0; }
-    backup || { echo 'Backup falhou. Importacao cancelada.'; return 1; }
     if [[ "$path" == *.gz ]]; then
         unpacked=$(mktemp) || return 1
         trap 'rm -f -- "$unpacked"' EXIT
@@ -187,20 +170,19 @@ import_sql() (
     else
         compose exec -T db sh -c "$MYSQL_IMPORT" < "$path" || return 1
     fi
-    echo 'Importacao/restauracao concluida.'
+    echo 'Importacao concluida.'
     echo 'Se o dump usa outro banco, ajuste DB_NAME no .env e use a opcao 1.'
 )
 
-restore() {
+select_sql() {
     local path choice index
     local -a files=()
-    for path in "$ROOT/datasets/"*.sql "$ROOT/datasets/"*.sql.gz \
-                "$BACKUPS/"*.sql "$BACKUPS/"*.sql.gz; do
+    for path in "$ROOT/datasets/"*.sql "$ROOT/datasets/"*.sql.gz; do
         [[ -f "$path" ]] && files+=("$path")
     done
-    echo 'Arquivos SQL disponiveis (datasets e backups):'
+    echo 'Datasets disponiveis:'
     if (( ${#files[@]} == 0 )); then
-        echo 'Nenhum arquivo SQL disponivel em datasets/ ou backups/.'
+        echo 'Nenhum arquivo SQL disponivel em datasets/.'
     else
         for ((index=0; index<${#files[@]}; index++)); do
             printf ' %s - %s\n' "$((index + 1))" "${files[index]#"$ROOT/"}"
@@ -232,17 +214,15 @@ database_menu() {
         cat <<'MENU'
 
 === Banco de dados ===
- 1 - Importar SQL ou restaurar backup
- 2 - Fazer backup
- 3 - Ver acesso ao phpMyAdmin
+ 1 - Importar dataset SQL
+ 2 - Ver acesso ao phpMyAdmin
  0 - Voltar
 MENU
         read -r -p 'Escolha: ' choice || return 0
         case "$choice" in
             0) return 0 ;;
-            1) check_docker && restore ;;
-            2) check_docker && backup ;;
-            3) access ;;
+            1) check_docker && select_sql ;;
+            2) access ;;
             *) echo 'Opcao invalida.'; continue ;;
         esac
         if (( $? != 0 )); then echo 'Operacao falhou. Confira o Docker e a configuracao em .env.'; fi
@@ -267,11 +247,10 @@ start_environment() {
     compose up -d --build --wait --wait-timeout 360 && access && web_access
 }
 
-test_environment() {
+run_allocation() {
     mkdir -p -- "$ROOT/resultados" &&
         compose ps --all && access &&
-        compose exec -T app python -m app.main &&
-        compose exec -T -e RUN_DB_TESTS=1 app python -m pytest -q -p no:cacheprovider
+        compose exec -T app python -m app.main
 }
 
 main() {
@@ -282,8 +261,8 @@ main() {
 
 === Ambiente de alocacao de desenvolvedores ===
  1 - Iniciar / atualizar ambiente
- 2 - Executar alocacao e testes
- 3 - Banco de dados (importar, backup e acesso)
+ 2 - Executar alocacao
+ 3 - Banco de dados (importar e acesso)
  4 - Encerrar ambiente (preserva banco)
  5 - Analisar ambiente e dependencias
  6 - Mostrar IP e porta da interface web
@@ -301,10 +280,10 @@ MENU
         if [[ "$choice" != 3 && "$choice" != 6 ]]; then check_docker || continue; fi
         case "$choice" in
             1) start_environment ;;
-            2) test_environment ;;
+            2) run_allocation ;;
             3) database_menu ;;
             6) web_access ;;
-            4) compose down --remove-orphans && echo 'Ambiente encerrado. Banco e backups preservados.' ;;
+            4) compose down --remove-orphans && echo 'Ambiente encerrado. Banco preservado.' ;;
         esac
         if (( $? != 0 )); then echo 'Operacao falhou. Use a analise (5) e confira .env.'; fi
     done
