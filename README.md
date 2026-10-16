@@ -384,11 +384,44 @@ do banco. Uma lista vazia declara explicitamente que não há habilidades
 informadas/exigidas. A aplicação acusa configuração incompleta ao ativar um
 critério sem os dados necessários, em vez de inventar essas informações.
 
-Também é possível executar diretamente:
+Execute a alocação pela linha de comando dentro do container:
 
 ```bash
-docker compose exec app python -m app.main
+docker compose exec app python app/main.py -d 5 -t 10
 ```
+
+Parâmetros disponíveis:
+
+| Parâmetro | O que faz |
+| --- | --- |
+| `-d N`, `--devs N` | Limita a quantidade de desenvolvedores participantes a, no máximo, N. |
+| `-t N`, `--tarefas N` | Limita a quantidade de tarefas participantes a, no máximo, N. |
+| `-s N`, `--sprints N` | Seleciona até N sprints no total, em ordem crescente de ID. |
+| `-p N`, `--projetos N` | Seleciona até N projetos, em ordem crescente de ID. |
+| `-h`, `--help` | Mostra a ajuda e encerra sem executar a alocação. |
+
+Exemplo com todos os parâmetros:
+
+```bash
+docker compose exec app python app/main.py -d 30 -t 50 -s 2 -p 3
+```
+
+As quantidades aceitam inteiros positivos e representam limites máximos. Se o
+banco tiver menos registros, serão usados apenas os disponíveis. Os argumentos
+informados substituem os valores correspondentes do JSON somente nessa execução;
+parâmetros omitidos continuam usando o JSON, que não é alterado. Para ver a
+ajuda, execute `docker compose exec app python app/main.py --help`. Ao terminar,
+a saída informa o tempo total da execução, incluindo leitura do banco,
+alocação e gravação do arquivo JSON.
+
+Projetos são selecionados por ID crescente; depois, sprints dos projetos
+selecionados, também por ID crescente. `-s` é o total de sprints do recorte,
+não a quantidade por projeto. Esses filtros são aplicados antes dos limites
+de devs e tarefas. O filtro de sprint afeta as tarefas; devs pertencem aos
+projetos selecionados. Os filtros `projeto_id` e `sprint_id` do JSON continuam
+valendo: `-p 3` significa até três projetos, e não o projeto de ID 3.
+Se houver menos registros disponíveis, são usados apenas os existentes.
+O matching continua limitado a uma tarefa por dev no conjunto da execução.
 
 Existem dois algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
 participantes, restrições e cálculo das notas:

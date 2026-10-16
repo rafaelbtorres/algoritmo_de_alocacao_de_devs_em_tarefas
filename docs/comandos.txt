@@ -1,0 +1,1 @@
+docker compose exec app python app/main.py -d 5 -t 10

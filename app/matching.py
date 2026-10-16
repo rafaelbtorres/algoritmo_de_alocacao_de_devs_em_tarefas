@@ -1,4 +1,3 @@
-"""Alocacao 1:1: SciPy ponderado ou BFS por caminhos aumentantes."""
 import math
 import random
 from collections import deque
