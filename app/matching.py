@@ -147,10 +147,21 @@ def prepare_problem(developers, tasks, config):
                 raise ValueError(f'Informe a disponibilidade do dev {uid} na tabela de desenvolvedores.')
             available[uid] = data['disponivel']
         if criteria.get('habilidades') or weights.get('habilidades', 0) > 0:
-            skills[uid] = skill_set(data.get('habilidades'), f'dados_devs.{uid}.habilidades')
+            dev_skills = data.get('habilidades')
+            if dev_skills is None:
+                if criteria.get('habilidades'):
+                    raise ValueError(f'Informe as áreas de atuação do dev {uid}; para a restrição obrigatória, classifique todos os devs e tarefas.')
+            else:
+                skills[uid] = skill_set(dev_skills, f'dados_devs.{uid}.habilidades')
     if criteria.get('habilidades') or weights.get('habilidades', 0) > 0:
         for task in tasks:
-            requirements[task['ID']] = skill_set(config.get('habilidades_tarefas', {}).get(str(task['ID'])), f'habilidades_tarefas.{task["ID"]}')
+            task_id = task['ID']
+            task_skills = config.get('habilidades_tarefas', {}).get(str(task_id))
+            if task_skills is None:
+                if criteria.get('habilidades'):
+                    raise ValueError(f'Informe as áreas exigidas pela tarefa {task_id}; para a restrição obrigatória, classifique todos os devs e tarefas.')
+            else:
+                requirements[task_id] = skill_set(task_skills, f'habilidades_tarefas.{task_id}')
     return developers, tasks, available, skills, requirements
 
 
@@ -158,10 +169,12 @@ def evaluate_pair(dev, task, config, available, skills, requirements):
     criteria, weights = config.get('criterios', {}), config.get('pesos', {})
     uid, tid = dev['ID'], task['ID']
     same_project = dev.get('Project_ID') is not None and dev.get('Project_ID') == task.get('Project_ID')
+    skills_informed = uid in skills and tid in requirements
     required = requirements.get(tid, set())
-    covered = required & skills.get(uid, set())
+    developer_skills = skills.get(uid, set())
+    covered = required & developer_skills
     factors = {'mesmo_projeto': float(same_project), 'disponibilidade': float(available.get(uid, False)),
-               'habilidades': len(covered) / len(required) if required else 1.0}
+               'habilidades': (len(covered) / len(required) if required else 1.0) if skills_informed else None}
     reasons = []
     if criteria.get('mesmo_projeto') and not same_project:
         reasons.append('Projetos diferentes ou projeto do dev nao informado.')
@@ -172,22 +185,34 @@ def evaluate_pair(dev, task, config, available, skills, requirements):
     limit = criteria.get('max_story_points_por_tarefa')
     if limit is not None and (task.get('Story_Point') is None or task['Story_Point'] > limit):
         reasons.append('Story points ausentes ou acima do limite.')
-    total_weight = sum(weights.values())
+    known_weight = sum(weights.get(key, 0) for key, value in factors.items() if value is not None)
     components = [{'criterio': key, 'peso': weights.get(key, 0), 'fator': factors[key],
-                   'contribuicao': 100 * weights.get(key, 0) * factors[key] / total_weight if total_weight else 0}
+                   'contribuicao': 100 * weights.get(key, 0) * factors[key] / known_weight
+                   if factors[key] is not None and known_weight else 0}
                   for key in factors]
-    score = sum(c['contribuicao'] for c in components) if total_weight else 0.0
+    score = sum(c['contribuicao'] for c in components) if known_weight else 0.0
     return {'permitido': not reasons, 'pontuacao': score if not reasons else None,
             'motivos': reasons, 'componentes': components,
-            'habilidades_atendidas': sorted(covered), 'habilidades_exigidas': sorted(required)}
+            'habilidades_atendidas': sorted(covered) if skills_informed else None,
+            'habilidades_exigidas': sorted(required) if tid in requirements else None,
+            'habilidades_dev_informadas': uid in skills,
+            'habilidades_tarefa_informadas': tid in requirements,
+            'fatores_ignorados': [key for key, value in factors.items()
+                                  if weights.get(key, 0) > 0 and value is None],
+            'sem_pontuacao': bool(weights) and any(weights.values()) and known_weight == 0}
 
 
 def score_matrix(developers, tasks, config):
     prepared = prepare_problem(developers, tasks, config)
     developers, tasks, *context = prepared
-    values = [[evaluate_pair(dev, task, config, *context)['pontuacao'] for task in tasks] for dev in developers]
+    evaluations = [[evaluate_pair(dev, task, config, *context) for task in tasks] for dev in developers]
+    values = [[cell['pontuacao'] for cell in row] for row in evaluations]
+    skills_partial = config.get('pesos', {}).get('habilidades', 0) > 0
     return developers, tasks, {'dev_ids': [d['ID'] for d in developers], 'tarefa_ids': [t['ID'] for t in tasks],
-                              'valores': values, 'pesos': config.get('pesos', {}), 'escala': 100}
+                              'valores': values, 'pesos': config.get('pesos', {}), 'escala': 100,
+                              'sem_dados': [[skills_partial and not (cell['habilidades_dev_informadas'] and cell['habilidades_tarefa_informadas'])
+                                             for cell in row] for row in evaluations],
+                              'sem_pontuacao': [[cell['sem_pontuacao'] for cell in row] for row in evaluations]}
 
 
 def allocate(developers, tasks, config, trace=False):

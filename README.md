@@ -336,7 +336,7 @@ reproduzem a ordem e o resultado na mesma versão do ambiente.
 Com pesos, a nota de um par permitido é:
 
 ```text
-nota = 100 × soma(peso × atendimento) / soma(pesos)
+nota do par = 100 × soma(peso × atendimento) / soma dos pesos informados para o par
 ```
 
 Mesmo projeto e disponibilidade têm atendimento 0 ou 1. Habilidades usam a
@@ -349,6 +349,14 @@ e a pontuação de cada alocação. Uma célula bloqueada contém `null`; zero �
 uma nota válida. Para preferir habilidades parcialmente atendidas, use o peso
 e mantenha a restrição de habilidades desativada.
 
+O peso de habilidades aceita classificações parciais. Quando falta a lista do
+dev ou da tarefa, o par continua permitido e o componente de habilidades fica
+fora da nota daquele par; os outros pesos são renormalizados. A matriz mostra
+esses pares com contorno tracejado e exibe a nota calculada com os pesos
+disponíveis (zero quando nenhum outro critério pode pontuar). A restrição
+obrigatória de habilidades ainda exige classificação completa e bloqueia pares
+que não atendem aos requisitos.
+
 Na interface, as habilidades são selecionadas em menus de áreas de atuação,
 com opções como Teste, Frontend, Backend, FullStack, DevOps, Mobile, UX/UI,
 Dados, Segurança e Infraestrutura. O catálogo fica em `config/areas.json`.
@@ -358,13 +366,16 @@ minúsculas; FullStack é uma categoria própria e não inclui automaticamente
 Frontend e Backend. Para exigir as duas áreas, selecione ambas.
 
 **Sem requisitos** na tarefa ou **Nenhuma habilidade declarada** no dev grava
-uma lista vazia; **Não informado** remove a declaração e exige preenchimento
-quando o critério/peso estiver ativo. Valores salvos anteriormente continuam
+uma lista vazia; **Não informado** remove a declaração. Na restrição obrigatória
+isso exige preenchimento; no peso, o componente é ignorado para os pares com
+dados incompletos. Valores salvos anteriormente continuam
 visíveis e podem ser removidos, mesmo se não fizerem parte do catálogo.
 **Salvar critérios** grava as seleções no mesmo JSON usado pelos dois algoritmos.
 
-Como o TAWOS não informa habilidades nem disponibilidade, ao ativar esses
-critérios ou pesos preencha os dados manualmente para todos os devs/tarefas selecionados.
+Como o TAWOS não informa habilidades nem disponibilidade, ao ativar restrições
+obrigatórias preencha os dados manuais exigidos. O peso de habilidades aceita
+listas incompletas; disponibilidade continua exigindo que os devs selecionados
+tenham sido classificados.
 Em `dados_devs`, as chaves são IDs de usuários como texto; por exemplo,
 `"123": {"disponivel": true, "habilidades": ["python", "sql"]}`. Em
 `habilidades_tarefas`, use IDs de tarefas como texto e listas de habilidades,

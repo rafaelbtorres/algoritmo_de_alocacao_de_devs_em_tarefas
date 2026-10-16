@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state = {config: {}, catalog: {}, devs: [], tasks: [], tab: 'tasks', result: null, runConfig: null, index: 0, pairs: [], active: null, playing: false, timer: null, busy: false, loadId: 0, started: 0, matrix: null, matrixConfig: null, matrixPage: 0, selectedCell: null, detailsId: 0, comparison: null};
+const state = {config: {}, catalog: {}, devs: [], tasks: [], tab: 'tasks', result: null, runConfig: null, index: 0, pairs: [], active: null, playing: false, timer: null, busy: false, loadId: 0, started: 0, timelineEvents: [], matrix: null, matrixConfig: null, matrixPage: 0, selectedCell: null, detailsId: 0, comparison: null};
 const labels = {matriz:'MATRIZ DE PONTUAÇÕES', resolver:'SOLUÇÃO GLOBAL CALCULADA', buscar:'BUSCA POR UM PAR', avaliar:'AVALIANDO UMA CONEXÃO', ocupada:'BUSCANDO CAMINHO ALTERNATIVO', sem_par:'SEM PAR DISPONÍVEL', alocar:'PAR DA SOLUÇÃO', concluir:'APRESENTAÇÃO CONCLUÍDA'};
 const number = value => Number(value).toLocaleString('pt-BR', {maximumFractionDigits: 3});
 
@@ -25,7 +25,7 @@ function populateSprints(selected = '') {
 }
 function setBusy(busy) {
   state.busy = busy;
-  document.querySelectorAll('.config-panel input,.config-panel select,#data-table input,#data-table select,#data-table button,#save-config,#reload,#fill-manual,#shuffle-order,#restore-order,#preview-matrix,#compare').forEach(el => el.disabled = busy);
+  document.querySelectorAll('.config-panel input,.config-panel select,#data-table input,#data-table select,#data-table button,#save-config,#save-data-config,#reload,#fill-manual,#shuffle-order,#restore-order,#preview-matrix,#compare').forEach(el => el.disabled = busy);
   $('fill-manual').disabled = busy || !(state.tab === 'tasks' ? state.tasks.length : state.devs.length);
   updateControls();
 }
@@ -42,6 +42,7 @@ function updateControls() {
 }
 function pause() { clearTimeout(state.timer); state.timer = null; state.playing = false; if (state.result && state.index < state.result.passos.length) $('run-status').textContent = 'Pausado'; updateControls(); }
 function clearRun(keepComparison = false) {
+  $('data-save-message').hidden = true;
   if (!keepComparison) { state.comparison = null; renderComparison(); }
   pause(); state.result = null; state.runConfig = null; state.index = 0; state.pairs = []; state.active = null;
   $('results-content').hidden = true; $('results-empty').hidden = false; $('download').disabled = true;
@@ -168,7 +169,10 @@ function applyStep() {
   if (!state.result || state.index >= state.result.passos.length) return;
   const event = state.result.passos[state.index++];
   state.active = event.tarefa_id !== undefined || event.dev_id !== undefined ? event : null;
-  if (event.tipo === 'alocar') { state.pairs = event.pares; state.active = null; }
+  if (event.tipo === 'alocar') {
+    state.pairs = event.pares; state.active = null;
+    state.timelineEvents.push({elapsed_ms: performance.now() - state.started, pairs: state.pairs.length});
+  }
   $('pair-count').textContent = state.pairs.length;
   $('step-label').textContent = labels[event.tipo] || 'PASSO DO ALGORITMO'; $('step-text').textContent = event.mensagem;
   $('progress-count').textContent = `${state.index} / ${state.result.passos.length}`;
@@ -190,7 +194,7 @@ function tick() {
 }
 function play() { state.playing = true; $('run-status').textContent = 'Em execução'; updateControls(); tick(); }
 function rewind() {
-  pause(); state.index = 0; state.pairs = []; state.active = null; state.started = performance.now();
+  pause(); state.index = 0; state.pairs = []; state.active = null; state.started = performance.now(); state.timelineEvents = [];
   $('results-content').hidden = true; $('results-empty').hidden = false; $('download').disabled = true; $('pair-count').textContent = '0';
   $('progress-count').textContent = `0 / ${state.result.passos.length}`; $('progress-bar').style.width = '0%'; $('run-status').textContent = 'Pausado';
   $('step-label').textContent = 'PRONTO PARA REPRODUZIR'; $('step-text').textContent = 'Use Continuar ou avance um passo de cada vez.';
@@ -202,7 +206,7 @@ async function startRun() {
   const config = getConfig(); setBusy(true); message('');
   try {
     const data = await api('/api/alocar', {method:'POST', body:JSON.stringify(config)});
-    state.result = data.resultado; state.runConfig = data.config; state.devs = data.devs; state.tasks = data.tarefas; state.started = performance.now();
+    state.result = data.resultado; state.runConfig = data.config; state.devs = data.devs; state.tasks = data.tarefas; state.started = performance.now(); state.timelineEvents = [];
     state.index = 0; state.pairs = []; state.active = null;
     state.matrix = data.resultado.matriz; state.matrixConfig = structuredClone(data.config); state.matrixPage = 0; renderMatrix();
     setBusy(false); play();
@@ -210,28 +214,32 @@ async function startRun() {
 }
 function renderAllocationTimeline(result) {
   const width = 840, height = 275, left = 65, right = 25, top = 25, bottom = 55;
-  const count = result.alocacoes.length, steps = result.passos.length;
-  const x = value => left + (width - left - right) * value / Math.max(steps, 1);
+  const count = result.alocacoes.length;
+  const timeline = result.apresentacao_tempo || {eventos: [], duracao_ms: 0};
+  const durationMs = Math.max(timeline.duracao_ms, ...timeline.eventos.map(event => event.elapsed_ms), 1);
+  const x = value => left + (width - left - right) * value / durationMs;
   const y = value => top + (height - top - bottom) * (1 - value / Math.max(count, 1));
   let pairs = 0, path = `M ${x(0)} ${y(0)}`, markers = '', axes = '';
-  result.passos.forEach((step, index) => {
-    if (step.tipo === 'alocar') {
-      pairs = step.pares.length;
-      path += ` H ${x(index + 1)} V ${y(pairs)}`;
-      markers += `<circle class="timeline-point" cx="${x(index + 1)}" cy="${y(pairs)}" r="4" tabindex="0" role="img" aria-label="${pairs} pares na etapa visual ${index + 1}"><title>Etapa visual ${index + 1}: ${pairs} pares</title></circle>`;
-    }
+  timeline.eventos.forEach(event => {
+    pairs = event.pairs;
+    const time = Math.min(event.elapsed_ms, durationMs);
+    path += ` L ${x(time)} ${y(pairs)}`;
+    markers += `<circle class="timeline-point" cx="${x(time)}" cy="${y(pairs)}" r="4" tabindex="0" role="img" aria-label="${pairs} pares após ${number(event.elapsed_ms / 1000)} segundos"><title>${number(event.elapsed_ms / 1000)} s: ${pairs} pares</title></circle>`;
   });
-  path += ` H ${x(steps)}`;
+  path += ` H ${x(durationMs)}`;
   const ticks = new Set([0,count]);
   for (let i = Math.max(1,Math.ceil(count / 5)); i < count; i += Math.max(1,Math.ceil(count / 5))) ticks.add(i);
-  for (const tick of ticks) axes += `<line class="timeline-grid" x1="${x(0)}" y1="${y(tick)}" x2="${x(steps)}" y2="${y(tick)}"/><text class="timeline-tick" x="${left - 12}" y="${y(tick) + 4}" text-anchor="end">${tick}</text>`;
-  const xticks = new Set(Array.from({length:6},(_,i)=>Math.round(steps*i/5)));
-  for (const tick of xticks) axes += `<text class="timeline-tick" x="${x(tick)}" y="${height-bottom+21}" text-anchor="middle">${tick}</text>`;
-  $('allocation-timeline').innerHTML = `<div class="timeline-scroll"><svg class="timeline-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Pares acumulados por etapa de apresentação, sem tempo interno do solver"><title>Evolução da apresentação da solução</title>${axes}<path class="timeline-line" d="${path}"/>${markers}<text class="timeline-axis-label" x="${width/2}" y="${height-8}" text-anchor="middle">Etapa de apresentação</text><text class="timeline-axis-label" transform="translate(17 ${height/2}) rotate(-90)" text-anchor="middle">Pares apresentados</text></svg></div><div class="timeline-summary">Cálculo ${result.codigo_algoritmo === 'bfs' ? 'BFS (inclui registro dos passos)' : 'SciPy'}: ${number(result.metricas.matching_ms)} ms. A linha conta etapas visuais; use a comparação para medir sem registro de passos.</div>`;
+  for (const tick of ticks) axes += `<line class="timeline-grid" x1="${x(0)}" y1="${y(tick)}" x2="${x(durationMs)}" y2="${y(tick)}"/><text class="timeline-tick" x="${left - 12}" y="${y(tick) + 4}" text-anchor="end">${tick}</text>`;
+  for (let i = 0; i <= 5; i++) {
+    const tick = durationMs * i / 5;
+    axes += `<text class="timeline-tick" x="${x(tick)}" y="${height-bottom+21}" text-anchor="middle">${number(tick/1000)} s</text>`;
+  }
+  $('allocation-timeline').innerHTML = `<div class="timeline-scroll"><svg class="timeline-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Pares acumulados ao longo do tempo decorrido da apresentação"><title>Evolução da apresentação da solução</title>${axes}<path class="timeline-line" d="${path}"/>${markers}<text class="timeline-axis-label" x="${width/2}" y="${height-8}" text-anchor="middle">Tempo decorrido na apresentação</text><text class="timeline-axis-label" transform="translate(17 ${height/2}) rotate(-90)" text-anchor="middle">Pares apresentados</text></svg></div><div class="timeline-summary">Apresentação: ${number(durationMs/1000)} s, incluindo pausas. O tempo de cálculo do ${result.codigo_algoritmo === 'bfs' ? 'BFS' : 'SciPy'} (${number(result.metricas.matching_ms)} ms) é medido separadamente.</div>`;
 }
 
 function finish() {
   pause(); state.active = null; state.pairs = state.result.alocacoes;
+  state.result.apresentacao_tempo = {eventos: state.timelineEvents, duracao_ms: performance.now() - state.started};
   $('run-status').textContent = 'Concluído'; $('download').disabled = false;
   $('results-empty').hidden = true; $('results-content').hidden = false;
   const r = state.result, m = r.metricas, count = r.alocacoes.length;
@@ -269,14 +277,21 @@ function renderMatrix() {
   head.innerHTML = '<tr><th scope="col">Dev / tarefa</th>' + tasks.map(id=>`<th scope="col">${escapeHTML(taskLabels.get(id))}</th>`).join('') + '</tr>';
   body.innerHTML = devs.map((id,i)=>`<tr><th scope="row">Dev ${id}</th>${tasks.map((tid,j)=>{
     const value = matrix.valores[rowStart + i][columnStart + j], blocked = value === null, paired = pairs.has(`${id}:${tid}`);
+    const missingSkills = matrix.sem_dados?.[rowStart + i]?.[columnStart + j] || false;
+    const noScore = matrix.sem_pontuacao?.[rowStart + i]?.[columnStart + j] || false;
     const selected = state.selectedCell === `${id}:${tid}`;
     const color = blocked ? '' : `background:hsl(91 35% ${96 - value * .48}%);color:${value > 65 ? '#fff' : '#183b30'}`;
     const text = blocked ? '×' : `${paired ? '✓ ' : ''}${number(value)}`;
-    return `<td><button type="button" style="${color}" class="${blocked ? 'blocked' : ''} ${paired ? 'paired' : ''} ${selected ? 'selected' : ''}" data-dev="${id}" data-task="${tid}" aria-pressed="${selected}" aria-label="Dev ${id}, tarefa ${tid}: ${blocked ? 'bloqueado' : `nota ${number(value)} de 100${paired ? ', par apresentado' : ''}`}">${text}</button></td>`;
+    const description = blocked ? 'bloqueado' : `nota ${number(value)} de 100${missingSkills ? noScore ? ', pontuação zero porque não há outro critério informado; peso de habilidades ignorado por falta de dados' : ', peso de habilidades ignorado por falta de dados' : ''}${paired ? ', par apresentado' : ''}`;
+    return `<td><button type="button" style="${color}" class="${blocked ? 'blocked' : ''} ${missingSkills ? 'partial' : ''} ${paired ? 'paired' : ''} ${selected ? 'selected' : ''}" data-dev="${id}" data-task="${tid}" aria-pressed="${selected}" aria-label="Dev ${id}, tarefa ${tid}: ${description}">${text}</button></td>`;
   }).join('')}</tr>`).join('');
   const noWeights = !Object.values(matrix.pesos).some(weight=>weight > 0);
   $('matrix-summary').classList.toggle('matrix-alert', noWeights);
-  $('matrix-summary').textContent = (noWeights ? 'Pesos de preferência em zero: todas as notas são 0. Defina um peso maior que zero na configuração para pontuar. ' : '') + `${matrix.dev_ids.length} devs × ${matrix.tarefa_ids.length} tarefas. Nota 0 é permitida; × indica bloqueio. Clique em uma célula para entender a nota.`;
+  const missingCells = matrix.sem_dados?.flat().filter(Boolean).length || 0;
+  $('matrix-summary').textContent = (noWeights ? 'Pesos de preferência em zero: todas as notas são 0. Defina um peso maior que zero na configuração para pontuar. ' : '') +
+    `${matrix.dev_ids.length} devs × ${matrix.tarefa_ids.length} tarefas. Nota 0 é permitida; × indica bloqueio.` +
+    (missingCells ? ` Em ${missingCells} pares faltam dados de habilidades: esse peso é ignorado, e os outros pesos são recalculados para eles. O contorno tracejado marca esses casos.` : '') +
+    ' Clique em uma célula para entender a nota.';
   $('matrix-page').textContent = `Devs ${rowStart + 1}–${rowStart + devs.length} · tarefas ${columnStart + 1}–${columnStart + tasks.length} · página ${state.matrixPage + 1}/${totalPages}`;
   $('matrix-prev').disabled = state.matrixPage === 0; $('matrix-next').disabled = state.matrixPage >= totalPages - 1;
 }
@@ -287,10 +302,12 @@ async function inspectPair(devId, taskId) {
   try {
     const data = await api('/api/par', {method:'POST',body:JSON.stringify({config:state.matrixConfig,dev_id:devId,tarefa_id:taskId})});
     if (token !== state.detailsId) return;
-    const contributions = data.componentes.filter(c=>c.peso > 0);
+    const contributions = data.componentes.filter(c=>c.peso > 0 && c.fator !== null);
     $('pair-details').innerHTML = `<h3>Dev ${data.dev_id} ↔ tarefa #${data.tarefa_id}</h3>` + (data.permitido ? `<strong>Nota: ${number(data.pontuacao)}/100</strong>` : `<strong>Par bloqueado</strong><ul>${data.motivos.map(reason=>`<li>${escapeHTML(reason)}</li>`).join('')}</ul>`) +
-      (contributions.length ? '<ul>' + contributions.map(c=>`<li>${criterionNames[c.criterio]}: ${number(c.fator * 100)}% de atendimento × peso ${number(c.peso)} → ${number(c.contribuicao)} pontos.</li>`).join('') + '</ul><p class="matrix-cell-note">Contribuição = 100 × peso × atendimento ÷ soma dos pesos.</p>' : '<p>Sem pesos ativos: todos os pares permitidos têm nota zero. O desempate pode produzir diferentes soluções igualmente válidas.</p>') +
-      (state.matrixConfig.pesos?.habilidades > 0 || state.matrixConfig.criterios?.habilidades ? `<p>Habilidades atendidas: ${escapeHTML(data.habilidades_atendidas.join(', ') || 'nenhuma')}. Exigidas: ${escapeHTML(data.habilidades_exigidas.join(', ') || 'nenhuma; atendimento de 100%')}.</p>` : '') +
+      (contributions.length ? '<ul>' + contributions.map(c=>`<li>${criterionNames[c.criterio]}: ${number(c.fator * 100)}% de atendimento × peso ${number(c.peso)} → ${number(c.contribuicao)} pontos.</li>`).join('') + '</ul><p class="matrix-cell-note">Contribuição = 100 × peso × atendimento ÷ soma dos pesos informados neste par.</p>' : (data.sem_pontuacao ? '<p>Nota 0: o peso de habilidades foi ignorado porque faltam dados neste par e não há outro peso com informação disponível para calcular uma nota.</p>' : '<p>Sem pesos ativos: todos os pares permitidos têm nota zero. O desempate pode produzir diferentes soluções igualmente válidas.</p>')) +
+      (data.fatores_ignorados.length ? `<p>Critério ignorado neste par por falta de dados: ${data.fatores_ignorados.map(key=>criterionNames[key]).join(', ')}. A nota considera somente os pesos com informação disponível.</p>` : '') +
+      (state.matrixConfig.pesos?.habilidades > 0 || state.matrixConfig.criterios?.habilidades ?
+        data.habilidades_dev_informadas && data.habilidades_tarefa_informadas ? `<p>Habilidades atendidas: ${escapeHTML(data.habilidades_atendidas.join(', ') || 'nenhuma')}. Exigidas: ${escapeHTML(data.habilidades_exigidas.join(', ') || 'nenhuma; atendimento de 100%')}.</p>` : `<p>Habilidades: ${data.habilidades_dev_informadas ? 'dev classificado' : 'áreas do dev não informadas'}; ${data.habilidades_tarefa_informadas ? 'tarefa classificada' : 'requisitos da tarefa não informados'}.</p>` : '') +
       (state.matrixConfig.algoritmo === 'bfs' ? '<p class="matrix-cell-note">No BFS, os pesos apenas avaliam os pares: a busca não otimiza as notas. Cada dev e tarefa podem aparecer em apenas um par.</p>' : '<p class="matrix-cell-note">A maior nota individual nem sempre faz parte da melhor solução global. Cada dev e tarefa podem aparecer em apenas um par.</p>');
   } catch(error) { if(token === state.detailsId) $('pair-details').textContent = error.message; }
 }
@@ -414,12 +431,20 @@ $('fill-manual').addEventListener('click', () => {
   clearRun(); renderGraph(); renderTable();
   message(state.tab === 'tasks' ? 'Tarefas declaradas sem requisitos de habilidades nesta configuração.' : 'Devs marcados como disponíveis nesta configuração.');
 });
-$('save-config').addEventListener('click', async () => {
+async function saveCriteria() {
+  if (state.busy) return;
   pause(); setBusy(true); message('');
-  try { const response = await api('/api/criterios', {method:'PUT', body:JSON.stringify(getConfig())}); message(response.mensagem); }
-  catch (error) { message(error.message, true); }
-  finally { setBusy(false); }
-});
+  const status = $('data-save-message');
+  status.hidden = false; status.className = 'data-save-message'; status.textContent = 'Salvando critérios…';
+  try {
+    const response = await api('/api/criterios', {method:'PUT', body:JSON.stringify(getConfig())});
+    message(response.mensagem); status.textContent = response.mensagem;
+  } catch (error) {
+    message(error.message, true); status.textContent = error.message; status.classList.add('error');
+  } finally { setBusy(false); }
+}
+$('save-config').addEventListener('click', saveCriteria);
+$('save-data-config').addEventListener('click', saveCriteria);
 $('download').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify({...state.result, configuracao:state.runConfig}, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'alocacao-matching.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
