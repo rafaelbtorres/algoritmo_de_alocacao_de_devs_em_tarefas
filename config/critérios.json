@@ -1,16 +1,32 @@
 {
+  "algoritmo": "scipy",
   "criterios": {
     "mesmo_projeto": false,
     "disponibilidade": false,
     "habilidades": false,
     "max_story_points_por_tarefa": null
   },
-  "dados_devs": {},
+  "dados_devs": {
+    "82": {
+      "habilidades": [
+        "Dados"
+      ]
+    }
+  },
   "direcao": "devs_para_tarefas",
-  "habilidades_tarefas": {},
+  "habilidades_tarefas": {
+    "3628": [
+      "Dados"
+    ]
+  },
+  "pesos": {
+    "mesmo_projeto": 0,
+    "disponibilidade": 0,
+    "habilidades": 0
+  },
   "projeto_id": null,
   "quantidade_devs": 20,
   "quantidade_tarefas": 47,
-  "sprint_id": null,
-  "semente_embaralhamento": null
+  "semente_embaralhamento": null,
+  "sprint_id": null
 }

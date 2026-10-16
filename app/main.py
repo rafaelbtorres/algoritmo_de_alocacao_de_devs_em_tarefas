@@ -85,6 +85,8 @@ def main():
     result['sprint_id'] = config.get('sprint_id')
     save_result(result, args.saida)
     print('\n=== Alocacao de desenvolvedores ===')
+    print(f"Algoritmo: {result['algoritmo']}")
+    print(f"Objetivo: {result['objetivo']}")
     print(f'Desenvolvedores: {len(developers)} | Tarefas: {len(tasks)}')
     reverse = result['direcao'] == 'tarefas_para_devs'
     print('Direcao: ' + ('tarefas -> desenvolvedores' if reverse else 'desenvolvedores -> tarefas'))
@@ -95,7 +97,7 @@ def main():
         if reverse:
             origin, target = target, origin
         print(f"{origin} -> {target} (sprint {row['sprint_id']})")
-    print(f"Alocacoes: {len(result['alocacoes'])}")
+    print(f"Alocacoes: {len(result['alocacoes'])} | Pontuacao total: {result['pontuacao_total']:.2f}")
     print(f"Devs sem tarefa: {len(result['devs_sem_tarefa'])} | Tarefas sem dev: {len(result['tarefas_sem_dev'])}")
     if not developers or not tasks:
         print('Nenhum par possivel. Confira a importacao do dataset e os filtros da configuracao.')

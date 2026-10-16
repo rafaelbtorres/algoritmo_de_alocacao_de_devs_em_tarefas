@@ -20,7 +20,7 @@ SQL -  https://ndownloader.figshare.com/files/37806375
 ## Ambiente Docker e menu interativo
 
 O ambiente inclui MySQL 8.4, phpMyAdmin e Python 3.12 com PyMySQL,
-NumPy, pandas, SciPy, NetworkX, Flask e Gunicorn. O algoritmo em `app/matching.py` associa desenvolvedores a tarefas por matching
+NumPy, pandas, SciPy, Flask e Gunicorn. O algoritmo em `app/matching.py` associa desenvolvedores a tarefas por matching
 bipartido. A configuração inicial não aplica critérios de compatibilidade.
 
 Use Bash e Docker Engine com Compose v2+ (ou Docker Desktop). Não é
@@ -64,7 +64,11 @@ sem depender de CDNs.
 
 Na página, você pode:
 
-- Escolher o sentido: desenvolvedores → tarefas ou tarefas → desenvolvedores.
+- Selecionar **SciPy** ou **BFS (matching anterior)** e escolher o sentido
+  desenvolvedores → tarefas ou tarefas → desenvolvedores.
+- Usar **Comparar os dois** para ver quantidade de pares, pontuação total,
+  participantes sem alocação e tempo de cada método no mesmo cenário. A
+  comparação pode ser baixada em JSON; mudar critérios ou filtros a invalida.
 - Selecionar projeto/sprint, limitar quantos devs e tarefas participam e explorar
   o recorte do banco antes de executar.
 - Embaralhar a ordem inicial dos participantes ou restaurar a ordem por ID.
@@ -74,15 +78,19 @@ Na página, você pode:
 - Iniciar, pausar, continuar, avançar um passo, reiniciar a reprodução e ajustar
   sua velocidade. A cada alocação, o grafo mostra os pares atuais.
 - Ver a distribuição de tarefas alocadas/sem dev, tempos de leitura do banco,
-  preparação do grafo e matching, além de baixar o resultado em JSON.
-- Acompanhar no gráfico de linhas a quantidade acumulada de alocações em
-  função do tempo real da busca, com um marcador por novo par formado.
+  preparação da matriz e cálculo SciPy, pontuação total e download JSON.
+- Configurar pesos de preferência de 0 a 100 para mesmo projeto, disponibilidade
+  e habilidades atendidas, independentemente das restrições obrigatórias.
+- Calcular a matriz de pontuações antes da alocação, navegar em páginas de até
+  20 devs × 20 tarefas e clicar nas células para ver a composição ou bloqueios.
+- Acompanhar no gráfico de linhas os pares acumulados por etapa de apresentação.
 
-A execução é calculada no servidor e registra as buscas, arestas avaliadas
-e caminhos aumentantes realmente usados. A página reproduz esse registro:
-pausar não mantém uma consulta SQL aberta nem muda o resultado calculado.
-O tempo de reprodução (incluindo pausas) é exibido separadamente dos tempos
-reais de processamento. O tempo de matching inclui o registro dos passos.
+No modo SciPy, a solução completa é calculada no servidor. A animação apresenta os pares
+finais, com pausa, avanço e repetição; ela **não reproduz operações internas**
+do solver. O gráfico de linhas usa etapas visuais, não tempos internos que a
+biblioteca não fornece. No modo BFS, a animação reproduz os passos reais
+de busca, avaliação e reorganização dos pares. O tempo real de preparação, leitura do banco e chamada
+a cada algoritmo é medido separadamente; pausas não alteram essas medições.
 Nenhum responsável histórico no MySQL é alterado. A execução web não
 sobrescreve `resultados/alocacao.json`; use o botão de download para guardar
 seu resultado. Esse arquivo local continua sendo gerado pela opção 2 do menu.
@@ -267,7 +275,8 @@ containers. `null` deixa um filtro/limite desativado; `false` desativa um crité
 
 | Variável | Comportamento quando configurada |
 | --- | --- |
-| `direcao` | `devs_para_tarefas` inicia a busca pelos devs; `tarefas_para_devs` inicia pelas tarefas |
+| `algoritmo` | `scipy` (padrão) otimiza pares e pontuação; `bfs` usa o matching anterior por caminhos aumentantes |
+| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS define as origens da busca e no SciPy orienta a matriz do cálculo |
 | `semente_embaralhamento` | `null` usa ordem por ID; um inteiro de 0 a 4294967295 reproduz uma ordem embaralhada |
 | `quantidade_devs` | Seleciona até N desenvolvedores; `null` usa todos os disponíveis no filtro |
 | `quantidade_tarefas` | Seleciona até N tarefas; `null` usa todas as disponíveis no filtro |
@@ -277,6 +286,9 @@ containers. `null` deixa um filtro/limite desativado; `false` desativa um crité
 | `criterios.max_story_points_por_tarefa` | Exclui tarefas acima desse limite ou sem estimativa; não é capacidade acumulada por sprint |
 | `criterios.habilidades` | Exige que o dev tenha todas as habilidades da tarefa |
 | `criterios.disponibilidade` | Só permite devs marcados como disponíveis |
+| `pesos.mesmo_projeto` | De 0 a 100; preferência por pares do mesmo projeto |
+| `pesos.disponibilidade` | De 0 a 100; preferência por devs disponíveis |
+| `pesos.habilidades` | De 0 a 100; preferência pela proporção de requisitos atendidos |
 
 Os campos **Quantidade de devs** e **Quantidade de tarefas** definem o recorte
 participante. Ao editá-los, a interface atualiza os números, tabelas e grafo,
@@ -294,35 +306,65 @@ campos também são respeitados na execução pelo menu 2 e na saída JSON.
 
 O botão **Embaralhar ordem** cria uma nova ordem para os dois grupos, atualiza
 o grafo e as tabelas e limpa a execução anterior. Os participantes escolhidos
-pelos filtros e quantidades continuam os mesmos. A busca realmente usa essa
-ordem, inclusive ao avaliar os vizinhos de cada nó; não se trata apenas de
-uma mudança visual. Os pares e os passos podem mudar quando há empates,
-mas a cardinalidade máxima continua a mesma para o mesmo grafo.
+pelos filtros e quantidades continuam os mesmos. A ordem é usada nas linhas
+e colunas entregues ao SciPy e na ordem da busca e dos vizinhos no BFS.
+Os dois preservam a quantidade máxima de pares. No SciPy, a pontuação ótima
+também é preservada; no BFS, a pontuação pode variar conforme a ordem.
 
 Use **Restaurar ordem por ID** para desfazer. **Salvar critérios** guarda a
 semente de embaralhamento no mesmo JSON de configuração; a opção 2 do menu
 também a respeita. O resultado registra a semente e as listas `ordem_devs`
 e `ordem_tarefas` para identificar a ordem utilizada. O banco não é alterado.
 
-Na interface, o campo **Sentido da alocação** muda o grupo que inicia a
-busca e coloca esse grupo à esquerda do grafo. As mensagens, os pares exibidos
+Na interface, o campo **Sentido da alocação** muda o grupo das linhas do
+cálculo e coloca esse grupo à esquerda do grafo. A matriz visual mantém devs
+nas linhas e tarefas nas colunas para facilitar a comparação. As mensagens, os pares exibidos
 e o JSON registram o sentido escolhido. A escolha também pode ser salva em
 `config/critérios.json` na variável `direcao`.
 
 Em ambos os sentidos, cada dev recebe no máximo uma tarefa e cada tarefa
 recebe no máximo um dev. A direção não habilita várias tarefas por dev ou
 vários devs por tarefa. Com os mesmos dados e critérios, a quantidade máxima
-de pares é a mesma; a ordem da busca, os passos e os pares escolhidos em caso
-de empate podem mudar.
+de pares é a mesma. No SciPy, a pontuação ótima também é a mesma; no BFS,
+a direção pode mudar os pares e sua pontuação.
 
-Todos os critérios estão inicialmente desativados. Não há pesos ou preferência
-entre pares: o algoritmo busca a maior quantidade de pares válidos. A busca
-percorre os grupos na ordem exibida no grafo: por ID, ou embaralhada quando
-essa opção estiver ativa. Os mesmos dados, critérios e semente reproduzem a
-mesma ordem e o mesmo resultado no ambiente atual.
+As restrições estão inicialmente desativadas e os pesos começam em zero.
+Sem pesos, todos os pares permitidos têm nota zero e o objetivo é maximizar
+apenas a quantidade de alocações. Os mesmos dados, critérios e semente
+reproduzem a ordem e o resultado na mesma versão do ambiente.
+
+Com pesos, a nota de um par permitido é:
+
+```text
+nota = 100 × soma(peso × atendimento) / soma(pesos)
+```
+
+Mesmo projeto e disponibilidade têm atendimento 0 ou 1. Habilidades usam a
+fração das habilidades exigidas presentes no dev, sem distinguir maiúsculas
+e minúsculas; tarefa explicitamente sem requisitos tem atendimento 1.
+Peso zero não exige dados manuais. Restrições bloqueiam pares mesmo que
+recebessem nota alta; pesos expressam preferências sem bloquear. As notas
+ficam entre 0 e 100 e o resultado exporta `matriz`, `pesos`, `pontuacao_total`
+e a pontuação de cada alocação. Uma célula bloqueada contém `null`; zero é
+uma nota válida. Para preferir habilidades parcialmente atendidas, use o peso
+e mantenha a restrição de habilidades desativada.
+
+Na interface, as habilidades são selecionadas em menus de áreas de atuação,
+com opções como Teste, Frontend, Backend, FullStack, DevOps, Mobile, UX/UI,
+Dados, Segurança e Infraestrutura. O catálogo fica em `config/areas.json`.
+Cada dev e tarefa pode ter várias áreas; selecione uma por vez e remova pelo
+**×**. Categorias são comparadas pelo nome, sem diferenciar maiúsculas e
+minúsculas; FullStack é uma categoria própria e não inclui automaticamente
+Frontend e Backend. Para exigir as duas áreas, selecione ambas.
+
+**Sem requisitos** na tarefa ou **Nenhuma habilidade declarada** no dev grava
+uma lista vazia; **Não informado** remove a declaração e exige preenchimento
+quando o critério/peso estiver ativo. Valores salvos anteriormente continuam
+visíveis e podem ser removidos, mesmo se não fizerem parte do catálogo.
+**Salvar critérios** grava as seleções no mesmo JSON usado pelos dois algoritmos.
 
 Como o TAWOS não informa habilidades nem disponibilidade, ao ativar esses
-critérios preencha os dados manualmente para todos os devs/tarefas selecionados.
+critérios ou pesos preencha os dados manualmente para todos os devs/tarefas selecionados.
 Em `dados_devs`, as chaves são IDs de usuários como texto; por exemplo,
 `"123": {"disponivel": true, "habilidades": ["python", "sql"]}`. Em
 `habilidades_tarefas`, use IDs de tarefas como texto e listas de habilidades,
@@ -337,10 +379,41 @@ Também é possível executar diretamente:
 docker compose exec app python -m app.main
 ```
 
-A implementação constrói um grafo bipartido com NetworkX e usa busca em
-largura por caminhos aumentantes para obter o matching de cardinalidade
-máxima. A mesma função atende a linha de comando e a interface, usando a
-representação de grafo do [NetworkX](https://networkx.org/documentation/stable/reference/algorithms/bipartite.html).
+Existem dois algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
+participantes, restrições e cálculo das notas:
+
+- **`scipy`**: [`scipy.optimize.linear_sum_assignment`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html),
+  com `maximize=True`, uma variante de Jonker–Volgenant. Maximiza primeiro a
+  quantidade de pares válidos e depois sua pontuação total. A utilidade interna
+  de um par válido é `min(devs, tarefas) + 1 + nota / 100`; o bônus preserva a
+  prioridade da quantidade de pares. Colunas fictícias de utilidade zero permitem
+  participantes sem alocação, e pares proibidos têm utilidade negativa infinita.
+  A animação apresenta a solução final, com `tipo_passos: apresentacao_da_solucao`.
+- **`bfs`**: o algoritmo anterior, com busca em largura por caminhos aumentantes.
+  Maximiza a quantidade de pares respeitando as restrições, sem usar pesos para
+  orientar as escolhas. A pontuação é calculada para avaliar a solução. Os passos
+  são registrados durante a busca (`tipo_passos: execucao_real`), com timestamps
+  reais. A estrutura do grafo usa dicionários Python, sem dependência do NetworkX.
+
+**Comparar os dois** faz uma única leitura do banco e fornece o mesmo recorte,
+ordem, sentido, restrições e pesos aos métodos. Cada um executa uma vez, sem
+registro de passos e sem animação; a tabela separa tempo do cálculo e tempo
+com preparação. São medições pontuais, sujeitas à carga do ambiente, não um
+benchmark estatístico. O tempo da execução visual do BFS inclui o registro de
+passos e não deve ser confundido com o tempo sem registro da comparação.
+
+O comparativo também mostra pares em comum e a diferença de pontuação.
+Ambos devem produzir a mesma quantidade máxima; o SciPy busca a melhor
+pontuação entre soluções dessa quantidade. Sem pesos, todas as notas são
+zero, embora possam existir pares diferentes igualmente válidos. O aviso na
+matriz orienta a definir pesos maiores que zero para gerar notas. Habilidades
+e disponibilidade precisam ser declaradas manualmente quando seus pesos
+estiverem ativos. Restrições obrigatórias, sozinhas, não acrescentam pontos.
+
+A mesma função atende à linha de comando e à web. **Salvar critérios** guarda
+o algoritmo escolhido em `config/critérios.json`, também usado pelo menu 2.
+O JSON de resultado identifica `codigo_algoritmo`, `algoritmo` e `objetivo`.
+O botão de download da comparação exporta os dois resultados e a configuração.
 
 ### Desenvolvimento local
 

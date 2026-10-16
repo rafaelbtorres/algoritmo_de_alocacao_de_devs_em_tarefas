@@ -11,7 +11,7 @@ from werkzeug.exceptions import HTTPException
 
 from app.db import connect
 from app.main import load_data, save_result
-from app.matching import allocate, validate_config
+from app.matching import allocate, validate_config, score_matrix, prepare_problem, evaluate_pair
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / 'config/critérios.json'
@@ -63,7 +63,8 @@ def bootstrap():
             projects = cursor.fetchall()
             cursor.execute('SELECT ID, Name, Project_ID FROM Sprint ORDER BY Start_Date, ID')
             sprints = cursor.fetchall()
-    return jsonify(config=config, projetos=projects, sprints=sprints)
+    areas = json.loads((ROOT / 'config/areas.json').read_text(encoding='utf-8'))
+    return jsonify(config=config, projetos=projects, sprints=sprints, areas=areas)
 
 
 @app.post('/api/dados')
@@ -83,6 +84,44 @@ def run():
     result['sprint_id'] = config.get('sprint_id')
     # A execucao usa exatamente esta configuracao; nao sobrescreve a configuracao salva.
     return jsonify(resultado=result, devs=developers, tarefas=tasks, config=config)
+
+
+@app.post('/api/matriz')
+def matrix():
+    config = payload_config()
+    developers, tasks, _ = dataset(config)
+    developers, tasks, scores = score_matrix(developers, tasks, config)
+    return jsonify(matriz=scores, devs=developers, tarefas=tasks)
+
+
+@app.post('/api/comparar')
+def compare():
+    config = payload_config()
+    # Uma unica leitura fornece o mesmo recorte e a mesma ordem aos dois metodos.
+    developers, tasks, elapsed = dataset(config)
+    results = {}
+    for algorithm in ('bfs', 'scipy'):
+        result = allocate(developers, tasks, {**config, 'algoritmo': algorithm}, trace=False)
+        result['metricas']['leitura_ms'] = elapsed
+        results[algorithm] = result
+    return jsonify(resultados=results, config=config,
+                   observacao='Mesmos dados e criterios; tempos sem registro de passos e sem animacao. Uma execucao por metodo; os tempos podem variar.')
+
+
+@app.post('/api/par')
+def pair_details():
+    payload = request.get_json()
+    if not isinstance(payload, dict):
+        raise ValueError('Envie configuracao e IDs do par.')
+    config = payload.get('config')
+    validate_config(config)
+    developers, tasks, _ = dataset(config)
+    developers, tasks, *context = prepare_problem(developers, tasks, config)
+    dev = next((d for d in developers if d['ID'] == payload.get('dev_id')), None)
+    task = next((t for t in tasks if t['ID'] == payload.get('tarefa_id')), None)
+    if dev is None or task is None:
+        raise ValueError('Par fora do recorte selecionado.')
+    return jsonify(dev_id=dev['ID'], tarefa_id=task['ID'], **evaluate_pair(dev, task, config, *context))
 
 
 @app.put('/api/criterios')
