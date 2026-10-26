@@ -20,7 +20,7 @@ SQL -  https://ndownloader.figshare.com/files/37806375
 ## Ambiente Docker e menu interativo
 
 O ambiente inclui MySQL 8.4, phpMyAdmin e Python 3.12 com PyMySQL,
-NumPy, pandas, SciPy, Flask e Gunicorn. O algoritmo em `app/matching.py` associa desenvolvedores a tarefas por matching
+NumPy, pandas, SciPy, Kwok, Flask e Gunicorn. O algoritmo em `app/matching.py` associa desenvolvedores a tarefas por matching
 bipartido. A configuração inicial não aplica critérios de compatibilidade.
 
 Use Bash e Docker Engine com Compose v2+ (ou Docker Desktop). Não é
@@ -64,9 +64,10 @@ sem depender de CDNs.
 
 Na página, você pode:
 
-- Selecionar **SciPy** ou **BFS (matching anterior)** e escolher o sentido
+- Selecionar **SciPy**, **BFS (matching anterior)**, **SSP (guloso por caminhos)**
+  ou **Kwok (matching ponderado, 2025)** e escolher o sentido
   desenvolvedores → tarefas ou tarefas → desenvolvedores.
-- Usar **Comparar os dois** para ver quantidade de pares, pontuação total,
+- Usar **Comparar algoritmos** para ver quantidade de pares, pontuação total,
   participantes sem alocação e tempo de cada método no mesmo cenário. A
   comparação pode ser baixada em JSON; mudar critérios ou filtros a invalida.
 - Selecionar projeto/sprint, limitar quantos devs e tarefas participam e explorar
@@ -78,18 +79,20 @@ Na página, você pode:
 - Iniciar, pausar, continuar, avançar um passo, reiniciar a reprodução e ajustar
   sua velocidade. A cada alocação, o grafo mostra os pares atuais.
 - Ver a distribuição de tarefas alocadas/sem dev, tempos de leitura do banco,
-  preparação da matriz e cálculo SciPy, pontuação total e download JSON.
+  preparação da matriz e do solver, cálculo do método escolhido, pontuação total e download JSON.
 - Configurar pesos de preferência de 0 a 100 para mesmo projeto, disponibilidade
   e habilidades atendidas, independentemente das restrições obrigatórias.
 - Calcular a matriz de pontuações antes da alocação, navegar em páginas de até
   20 devs × 20 tarefas e clicar nas células para ver a composição ou bloqueios.
 - Acompanhar no gráfico de linhas os pares acumulados por etapa de apresentação.
 
-No modo SciPy, a solução completa é calculada no servidor. A animação apresenta os pares
+Nos modos SciPy e Kwok, a solução completa é calculada no servidor. A animação apresenta os pares
 finais, com pausa, avanço e repetição; ela **não reproduz operações internas**
 do solver. O gráfico de linhas usa etapas visuais, não tempos internos que a
-biblioteca não fornece. No modo BFS, a animação reproduz os passos reais
-de busca, avaliação e reorganização dos pares. O tempo real de preparação, leitura do banco e chamada
+biblioteca não fornece. Nos modos BFS e SSP, a animação reproduz os passos reais
+de busca e reorganização dos pares; o BFS também registra avaliações individuais.
+O SSP registra cada busca pelo caminho de menor custo e a aplicação desse caminho,
+incluindo os pares removidos e os novos pares. O tempo real de preparação, leitura do banco e chamada
 a cada algoritmo é medido separadamente; pausas não alteram essas medições.
 Nenhum responsável histórico no MySQL é alterado. A execução web não
 sobrescreve `resultados/alocacao.json`; use o botão de download para guardar
@@ -275,8 +278,8 @@ containers. `null` deixa um filtro/limite desativado; `false` desativa um crité
 
 | Variável | Comportamento quando configurada |
 | --- | --- |
-| `algoritmo` | `scipy` (padrão) otimiza pares e pontuação; `bfs` usa o matching anterior por caminhos aumentantes |
-| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS define as origens da busca e no SciPy orienta a matriz do cálculo |
+| `algoritmo` | `scipy` (padrão), `ssp` e `kwok` otimizam pares e pontuação; `bfs` maximiza somente a quantidade de pares |
+| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS e SSP define as origens da busca e no SciPy orienta a matriz; Kwok coloca internamente o menor grupo ativo à esquerda e remapeia o resultado para o sentido escolhido |
 | `semente_embaralhamento` | `null` usa ordem por ID; um inteiro de 0 a 4294967295 reproduz uma ordem embaralhada |
 | `quantidade_devs` | Seleciona até N desenvolvedores; `null` usa todos os disponíveis no filtro |
 | `quantidade_tarefas` | Seleciona até N tarefas; `null` usa todas as disponíveis no filtro |
@@ -307,9 +310,10 @@ campos também são respeitados na execução pelo menu 2 e na saída JSON.
 O botão **Embaralhar ordem** cria uma nova ordem para os dois grupos, atualiza
 o grafo e as tabelas e limpa a execução anterior. Os participantes escolhidos
 pelos filtros e quantidades continuam os mesmos. A ordem é usada nas linhas
-e colunas entregues ao SciPy e na ordem da busca e dos vizinhos no BFS.
-Os dois preservam a quantidade máxima de pares. No SciPy, a pontuação ótima
-também é preservada; no BFS, a pontuação pode variar conforme a ordem.
+e colunas entregues aos solvers e na ordem das buscas e dos vizinhos.
+Os quatro preservam a quantidade máxima de pares. No SciPy, SSP e Kwok,
+a pontuação ótima também é preservada, respeitada a precisão numérica;
+no BFS, a pontuação pode variar conforme a ordem. Pares empatados podem mudar.
 
 Use **Restaurar ordem por ID** para desfazer. **Salvar critérios** guarda a
 semente de embaralhamento no mesmo JSON de configuração; a opção 2 do menu
@@ -325,7 +329,7 @@ e o JSON registram o sentido escolhido. A escolha também pode ser salva em
 Em ambos os sentidos, cada dev recebe no máximo uma tarefa e cada tarefa
 recebe no máximo um dev. A direção não habilita várias tarefas por dev ou
 vários devs por tarefa. Com os mesmos dados e critérios, a quantidade máxima
-de pares é a mesma. No SciPy, a pontuação ótima também é a mesma; no BFS,
+de pares é a mesma. No SciPy, SSP e Kwok, a pontuação ótima também é a mesma; no BFS,
 a direção pode mudar os pares e sua pontuação.
 
 As restrições estão inicialmente desativadas e os pesos começam em zero.
@@ -370,7 +374,7 @@ uma lista vazia; **Não informado** remove a declaração. Na restrição obriga
 isso exige preenchimento; no peso, o componente é ignorado para os pares com
 dados incompletos. Valores salvos anteriormente continuam
 visíveis e podem ser removidos, mesmo se não fizerem parte do catálogo.
-**Salvar critérios** grava as seleções no mesmo JSON usado pelos dois algoritmos.
+**Salvar critérios** grava as seleções no mesmo JSON usado pelos quatro algoritmos.
 
 Como o TAWOS não informa habilidades nem disponibilidade, ao ativar restrições
 obrigatórias preencha os dados manuais exigidos. O peso de habilidades aceita
@@ -390,7 +394,7 @@ Também é possível executar diretamente:
 docker compose exec app python -m app.main
 ```
 
-Existem dois algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
+Existem quatro algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
 participantes, restrições e cálculo das notas:
 
 - **`scipy`**: [`scipy.optimize.linear_sum_assignment`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html),
@@ -405,17 +409,79 @@ participantes, restrições e cálculo das notas:
   orientar as escolhas. A pontuação é calculada para avaliar a solução. Os passos
   são registrados durante a busca (`tipo_passos: execucao_real`), com timestamps
   reais. A estrutura do grafo usa dicionários Python, sem dependência do NetworkX.
+- **`ssp` — SSP, guloso por caminhos de menor custo**: representa os pares
+  permitidos em uma rede `origem → devs → tarefas → destino` (invertida na
+  direção tarefas → devs), com capacidade 1 e custo `100 - nota` em cada par.
+  A cada busca, escolhe o caminho aumentante de menor custo no grafo residual.
+  Arestas reversas permitem desfazer pares anteriores e reorganizar a solução.
+  Continua enquanto existir caminho, mesmo que a próxima alocação reduza a
+  pontuação total: a quantidade de pares tem prioridade. Para cada quantidade,
+  a solução tem o menor custo e, portanto, a maior pontuação. Usa listas de
+  adjacência, Dijkstra com fila de prioridade e potenciais de nós, sem arredondar
+  as notas para inteiros. Registra buscas e reatribuições reais, com timestamps
+  e `tipo_passos: execucao_real`. A estratégia gulosa escolhe caminhos inteiros;
+  suas escolhas de pares podem ser revistas. Referências: [notas do MIT sobre
+  o algoritmo](https://courses.csail.mit.edu/6.854/18/Notes/n9-mincostflow.html)
+  e [garantia de custo mínimo por quantidade, Teorema 3](https://arxiv.org/pdf/1501.05493).
+- **`kwok` — Kwok (2025), matching ponderado**: usa o pacote
+  [`kwok==1.1.7`](https://pypi.org/project/kwok/1.1.7/), uma implementação
+  compilada em Cython do algoritmo descrito em
+  [A Faster Algorithm for Maximum Weight Matching on Unrestricted Bipartite Graphs](https://arxiv.org/abs/2502.20889).
+  O grafo do solver contém somente os pares permitidos, com utilidade
+  `min(devs, tarefas) + 1 + nota / 100`. O bônus mantém a prioridade da
+  quantidade e faz com que uma nota zero continue sendo uma aresta real positiva.
+  Participantes isolados são retirados apenas da entrada do solver e mantidos
+  nas listas de participantes sem alocação. Os índices ativos são compactados,
+  o menor grupo ativo é colocado à esquerda, conforme exigido pelo pacote,
+  e os pares são remapeados para os IDs e a direção escolhida na interface.
+  Grafos vazios retornam nenhuma alocação sem chamar o solver. A opção
+  `keeps_virtual_matching=False` descarta os pares virtuais de peso zero que
+  representam participantes sem alocação; pares proibidos não entram no resultado.
+  As notas fracionárias são preservadas, sem conversão para inteiros. A integração
+  coloca uma linha com pesos fracionários no início quando necessário, pois a
+  versão 1.1.7 escolhe o tipo numérico olhando somente a primeira linha; os IDs
+  continuam sendo remapeados para os participantes originais. A animação
+  apresenta a solução final, com `tipo_passos: apresentacao_da_solucao`.
 
-**Comparar os dois** faz uma única leitura do banco e fornece o mesmo recorte,
+### Como escolher o algoritmo
+
+| Escolha | Quando usar |
+| --- | --- |
+| **SciPy (`scipy`)** | Escolha geral para solução ótima, especialmente quando muitos pares são permitidos. É o padrão. |
+| **SSP (`ssp`)** | Para acompanhar a estratégia gulosa exata e entender os caminhos de menor custo e as reatribuições. |
+| **Kwok (`kwok`)** | Para experimentar o algoritmo de 2025 em grafos com pares bloqueados e grupos de tamanhos diferentes. Compare o tempo no seu cenário. |
+| **BFS (`bfs`)** | Referência para maximizar a quantidade de pares, sem otimizar as notas. |
+
+SciPy, SSP e Kwok buscam a mesma quantidade máxima e a mesma pontuação
+ótima, respeitada a precisão de ponto flutuante. Se houver empate, os pares
+podem ser diferentes. Nenhum dos novos métodos tem ganho de velocidade
+garantido sobre o SciPy. O SSP em Python pode ser mais lento que os solvers
+compilados. Kwok usa listas de adjacência apenas com os pares permitidos, mas a preparação
+compartilhada ainda avalia todos os pares e monta a matriz completa para a
+interface e o JSON. Com as restrições desativadas, todos os pares são permitidos
+e essa representação pode não trazer vantagem.
+
+Na web, escolha em **Algoritmo** e clique em **Iniciar alocação**. A opção
+**Como escolher o algoritmo** explica os usos no próprio painel. Para usar
+a mesma escolha no menu 2, clique em **Salvar critérios**. Também é possível
+editar somente `algoritmo` em `config/critérios.json` para `ssp` ou `kwok`,
+preservando os demais campos. A CLI continua usando `python -m app.main`.
+
+**Comparar algoritmos** faz uma única leitura do banco e fornece o mesmo recorte,
 ordem, sentido, restrições e pesos aos métodos. Cada um executa uma vez, sem
 registro de passos e sem animação; a tabela separa tempo do cálculo e tempo
 com preparação. São medições pontuais, sujeitas à carga do ambiente, não um
-benchmark estatístico. O tempo da execução visual do BFS inclui o registro de
+benchmark estatístico. O tempo da execução visual do BFS e SSP inclui o registro de
 passos e não deve ser confundido com o tempo sem registro da comparação.
 
 O comparativo também mostra pares em comum e a diferença de pontuação.
-Ambos devem produzir a mesma quantidade máxima; o SciPy busca a melhor
-pontuação entre soluções dessa quantidade. Sem pesos, todas as notas são
+Os quatro devem produzir a mesma quantidade máxima; SciPy, SSP e Kwok
+buscam a melhor pontuação entre soluções dessa quantidade. O comparativo
+usa SciPy como referência e mostra a proporção de pares permitidos, os pares
+em comum e a diferença de pontuação de cada método. Compare também o tempo
+de preparação e cálculo, pois a conversão do grafo/matriz entra na preparação.
+Repita as medições para avaliar o desempenho no seu cenário.
+Sem pesos, todas as notas são
 zero, embora possam existir pares diferentes igualmente válidos. O aviso na
 matriz orienta a definir pesos maiores que zero para gerar notas. Habilidades
 e disponibilidade precisam ser declaradas manualmente quando seus pesos
@@ -424,7 +490,7 @@ estiverem ativos. Restrições obrigatórias, sozinhas, não acrescentam pontos.
 A mesma função atende à linha de comando e à web. **Salvar critérios** guarda
 o algoritmo escolhido em `config/critérios.json`, também usado pelo menu 2.
 O JSON de resultado identifica `codigo_algoritmo`, `algoritmo` e `objetivo`.
-O botão de download da comparação exporta os dois resultados e a configuração.
+O botão de download da comparação exporta os quatro resultados e a configuração.
 
 ### Desenvolvimento local
 

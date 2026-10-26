@@ -1,11 +1,21 @@
-"""Alocacao 1:1: SciPy ponderado ou BFS por caminhos aumentantes."""
+"""Alocacao 1:1 com BFS, SciPy, SSP guloso exato ou Kwok (2025)."""
 import math
 import random
 from collections import deque
+from heapq import heappop, heappush
 from time import perf_counter
 
 import numpy as np
+from kwok import kwok as kwok_matching
 from scipy.optimize import linear_sum_assignment
+
+
+ALGORITHMS = {
+    'bfs': 'BFS por caminhos aumentantes',
+    'scipy': 'scipy.optimize.linear_sum_assignment (Jonker-Volgenant modificado)',
+    'ssp': 'SSP (guloso por caminhos aumentantes de menor custo)',
+    'kwok': 'kwok.kwok (Kwok, 2025)',
+}
 
 
 def validate_config(config):
@@ -13,8 +23,8 @@ def validate_config(config):
         raise ValueError('A configuracao deve ser um objeto JSON.')
     if config.get('direcao', 'devs_para_tarefas') not in ('devs_para_tarefas', 'tarefas_para_devs'):
         raise ValueError('direcao deve ser devs_para_tarefas ou tarefas_para_devs.')
-    if config.get('algoritmo', 'scipy') not in ('scipy', 'bfs'):
-        raise ValueError('algoritmo deve ser scipy ou bfs.')
+    if not isinstance(config.get('algoritmo', 'scipy'), str) or config.get('algoritmo', 'scipy') not in ALGORITHMS:
+        raise ValueError('algoritmo deve ser scipy, bfs, ssp ou kwok.')
     for key in ('projeto_id', 'sprint_id', 'quantidade_devs', 'quantidade_tarefas'):
         value = config.get(key)
         if value is not None and (type(value) is not int or value < 1):
@@ -115,6 +125,124 @@ def matching_with_steps(graph, left, capture=False):
     if capture:
         emit('concluir', mensagem='Busca concluida. O matching tem a maior quantidade possivel de pares validos.')
     return matches, events, checked
+
+
+def prepare_ssp(values):
+    """Cria a rede residual com capacidade 1 e custo 100 - nota por par."""
+    rows, columns = values.shape
+    source, sink = rows + columns, rows + columns + 1
+    graph = [[] for _ in range(sink + 1)]
+
+    def add(first, second, cost):
+        # Aresta: destino, indice da reversa, capacidade residual e custo.
+        forward = [second, len(graph[second]), 1, cost]
+        backward = [first, len(graph[first]), 0, -cost]
+        graph[first].append(forward)
+        graph[second].append(backward)
+
+    for row in range(rows):
+        add(source, row, 0.0)
+    for column in range(columns):
+        add(rows + column, sink, 0.0)
+    valid_rows, valid_columns = np.nonzero(np.isfinite(values))
+    for row, column in zip(valid_rows, valid_columns):
+        add(int(row), rows + int(column), 100.0 - float(values[row, column]))
+    return graph
+
+
+def ssp_with_steps(graph, left, right, capture=False):
+    """Escolhe o caminho de menor custo; reversas permitem refazer pares anteriores."""
+    rows, columns = len(left), len(right)
+    source, sink = rows + columns, rows + columns + 1
+    potentials = [0.0] * len(graph)
+    matches, events = {}, []
+    started = perf_counter()
+
+    def emit(kind, **data):
+        if capture:
+            events.append({'tipo': kind, 'tempo_ms': (perf_counter() - started) * 1000, **data})
+
+    def pair(row, column):
+        first, second = left[row], right[column]
+        dev, task = (first, second) if first[0] == 'dev' else (second, first)
+        return {'dev_id': dev[1], 'tarefa_id': task[1]}
+
+    while True:
+        emit('buscar', mensagem='SSP: buscando o caminho de menor custo para acrescentar uma alocacao; pares anteriores podem ser reorganizados.')
+        distances, parents = [math.inf] * len(graph), [None] * len(graph)
+        distances[source] = 0.0
+        queue = [(0.0, source)]
+        while queue:
+            distance, node = heappop(queue)
+            if distance > distances[node]:
+                continue
+            for index, (target, _, capacity, cost) in enumerate(graph[node]):
+                if not capacity:
+                    continue
+                # Os potenciais tornam os custos reduzidos nao negativos.
+                # O max protege contra pequenos erros de arredondamento em floats.
+                reduced = max(0.0, cost + potentials[node] - potentials[target])
+                candidate = distance + reduced
+                if candidate < distances[target]:
+                    distances[target], parents[target] = candidate, (node, index)
+                    heappush(queue, (candidate, target))
+        if parents[sink] is None:
+            break
+        for node, distance in enumerate(distances):
+            if math.isfinite(distance):
+                potentials[node] += distance
+        added, removed = [], []
+        node = sink
+        while node != source:
+            previous, index = parents[node]
+            edge = graph[previous][index]
+            edge[2] -= 1
+            graph[node][edge[1]][2] += 1
+            if previous < rows and rows <= node < rows + columns:
+                added.append((previous, node - rows))
+            elif rows <= previous < rows + columns and node < rows:
+                removed.append((node, previous - rows))
+            node = previous
+        for row, _ in removed:
+            del matches[row]
+        for row, column in added:
+            matches[row] = column
+        if capture:
+            path = [pair(row, column) for row, column in reversed(added)]
+            emit('alocar', **path[0], caminho=path,
+                 removidos=[pair(row, column) for row, column in removed],
+                 pares=[pair(row, column) for row, column in sorted(matches.items())],
+                 mensagem=f'SSP: caminho de menor custo aplicado; {len(removed)} par(es) anterior(es) reorganizado(s). A solucao tem {len(matches)} pares e a melhor pontuacao para essa quantidade.')
+    emit('concluir', mensagem='SSP concluido: nenhum caminho aumentante restante. Quantidade maxima de pares e maior pontuacao total entre essas solucoes.')
+    return sorted(matches.items()), events
+
+
+def prepare_kwok(values):
+    """Compacta vertices ativos e coloca o menor grupo a esquerda do Kwok."""
+    valid = np.isfinite(values)
+    left = np.flatnonzero(valid.any(axis=1))
+    right = np.flatnonzero(valid.any(axis=0))
+    transposed = len(left) > len(right)
+    if transposed:
+        values, valid = values.T, valid.T
+        left, right = right, left
+    left_map, right_map = np.full(values.shape[0], -1), np.full(values.shape[1], -1)
+    left_map[left], right_map[right] = np.arange(len(left)), np.arange(len(right))
+    rows, columns = np.nonzero(valid)
+    # O bonus prioriza a quantidade e mantem notas zero como arestas reais positivas.
+    bonus = min(values.shape) + 1
+    weights = bonus + values[rows, columns] / 100
+    graph = [[] for _ in left]
+    for row, column, weight in zip(left_map[rows], right_map[columns], weights):
+        graph[int(row)].append((int(column), float(weight)))
+    # Kwok 1.1.7 escolhe o tipo numerico olhando somente a primeira linha.
+    # Mover uma linha fracionaria para o inicio evita truncar notas das demais.
+    fractional = next((row for row, edges in enumerate(graph)
+                       if any(not weight.is_integer() for _, weight in edges)), 0)
+    if fractional:
+        graph[0], graph[fractional] = graph[fractional], graph[0]
+        left[0], left[fractional] = left[fractional], left[0]
+    return graph, left, right, transposed
 
 
 def select_participants(developers, tasks, config):
@@ -242,6 +370,31 @@ def allocate(developers, tasks, config, trace=False):
         selected = [(i, task_indices[matches[node][1]]) for i, node in enumerate(left) if node in matches]
         if reverse:
             selected.sort(key=lambda pair: pair[1])
+    elif algorithm == 'ssp':
+        left = [('dev', d['ID']) for d in developers]
+        right = [('tarefa', t['ID']) for t in tasks]
+        origins, targets = (right, left) if reverse else (left, right)
+        graph = prepare_ssp(values.T if reverse else values)
+        prepared_at = perf_counter()
+        oriented_selected, events = ssp_with_steps(graph, origins, targets, capture=trace)
+        solved_at = perf_counter()
+        selected = [(column, row) if reverse else (row, column) for row, column in oriented_selected]
+    elif algorithm == 'kwok':
+        graph, left, right, transposed = prepare_kwok(values.T if reverse else values)
+        prepared_at = perf_counter()
+        # Pares virtuais de peso zero representam a ausencia de uma alocacao.
+        result = kwok_matching(graph, keeps_virtual_matching=False) if graph else None
+        solved_at = perf_counter()
+        if graph and result is None:
+            raise RuntimeError('Kwok nao retornou uma solucao para o grafo preparado.')
+        selected = []
+        if result is not None:
+            for row, column in enumerate(result.left_pairs):
+                if column < 0:
+                    continue
+                i, j = (int(right[column]), int(left[row])) if transposed else (int(left[row]), int(right[column]))
+                selected.append((j, i) if reverse else (i, j))
+        selected.sort(key=lambda pair: pair[1] if reverse else pair[0])
     else:
         oriented = values.T if reverse else values
         # O bonus preserva a prioridade: quantidade de pares, depois pontuacao.
@@ -268,10 +421,11 @@ def allocate(developers, tasks, config, trace=False):
                             'pontuacao': matrix['valores'][i][j]})
     used_devs = {p['dev_id'] for p in allocations}
     used_tasks = {p['tarefa_id'] for p in allocations}
-    if trace and algorithm == 'scipy':
+    if trace and algorithm in ('scipy', 'kwok'):
+        label = 'Kwok' if algorithm == 'kwok' else 'SciPy'
         events = [
             {'tipo': 'matriz', 'mensagem': 'Matriz preparada: cada celula representa a pontuacao de um par permitido; bloqueios nao participam da alocacao.'},
-            {'tipo': 'resolver', 'mensagem': 'O SciPy ja calculou a solucao global. A seguir, apresentamos os pares do resultado; esta sequencia nao mostra operacoes internas do solver.'},
+            {'tipo': 'resolver', 'mensagem': f'O {label} ja calculou a solucao global. A seguir, apresentamos os pares do resultado; esta sequencia nao mostra operacoes internas do solver.'},
         ]
         for index, pair in enumerate(allocations):
             events.append({'tipo': 'alocar', 'dev_id': pair['dev_id'], 'tarefa_id': pair['tarefa_id'],
@@ -281,9 +435,9 @@ def allocate(developers, tasks, config, trace=False):
         events.append({'tipo': 'concluir', 'mensagem': 'Apresentacao concluida: maior quantidade de pares validos e melhor pontuacao total entre essas solucoes.'})
     return {
         'codigo_algoritmo': algorithm,
-        'algoritmo': 'BFS por caminhos aumentantes' if algorithm == 'bfs' else 'scipy.optimize.linear_sum_assignment (Jonker-Volgenant modificado)',
+        'algoritmo': ALGORITHMS[algorithm],
         'objetivo': 'Maximizar quantidade de pares validos; pesos somente para avaliar o resultado.' if algorithm == 'bfs' else 'Maximizar quantidade de pares validos; depois maximizar pontuacao total.',
-        'tipo_passos': 'execucao_real' if algorithm == 'bfs' else 'apresentacao_da_solucao',
+        'tipo_passos': 'execucao_real' if algorithm in ('bfs', 'ssp') else 'apresentacao_da_solucao',
         'alocacoes': allocations,
         'pontuacao_total': sum(p['pontuacao'] for p in allocations),
         'devs_sem_tarefa': sorted({d['ID'] for d in developers} - used_devs),

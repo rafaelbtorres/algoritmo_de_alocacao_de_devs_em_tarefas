@@ -3,5 +3,6 @@ PyMySQL[rsa]>=1.1,<2
 numpy>=2.1,<3
 pandas>=2.2,<3
 scipy>=1.14,<2
+kwok==1.1.7
 Flask>=3.1,<4
 gunicorn>=23,<24

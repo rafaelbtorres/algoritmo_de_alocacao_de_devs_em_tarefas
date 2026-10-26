@@ -4,6 +4,21 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const state = {config: {}, catalog: {}, devs: [], tasks: [], tab: 'tasks', result: null, runConfig: null, index: 0, pairs: [], active: null, playing: false, timer: null, busy: false, loadId: 0, started: 0, timelineEvents: [], matrix: null, matrixConfig: null, matrixPage: 0, selectedCell: null, detailsId: 0, comparison: null};
 const labels = {matriz:'MATRIZ DE PONTUAÇÕES', resolver:'SOLUÇÃO GLOBAL CALCULADA', buscar:'BUSCA POR UM PAR', avaliar:'AVALIANDO UMA CONEXÃO', ocupada:'BUSCANDO CAMINHO ALTERNATIVO', sem_par:'SEM PAR DISPONÍVEL', alocar:'PAR DA SOLUÇÃO', concluir:'APRESENTAÇÃO CONCLUÍDA'};
 const number = value => Number(value).toLocaleString('pt-BR', {maximumFractionDigits: 3});
+const algorithms = {
+  bfs: {name:'BFS', label:'BFS · CAMINHOS AUMENTANTES', realSteps:true,
+    hint:'Algoritmo anterior: maximiza pares; os pesos servem apenas para avaliar a solução.',
+    initial:'Inicie para acompanhar as buscas e os caminhos aumentantes reais do BFS.'},
+  scipy: {name:'SciPy', label:'SCIPY · SOLUÇÃO GLOBAL', realSteps:false,
+    hint:'Boa escolha geral, especialmente quando muitos pares são permitidos. Maximiza pares e depois a pontuação total.',
+    initial:'Inicie o cálculo para apresentar a solução encontrada pelo SciPy.'},
+  ssp: {name:'SSP', label:'SSP · GULOSO POR CAMINHOS', realSteps:true,
+    hint:'Escolhe o caminho de menor custo e pode refazer pares anteriores. Use para acompanhar decisões reais com a mesma quantidade e pontuação ótimas do SciPy.',
+    initial:'Inicie para acompanhar os caminhos de menor custo e as reatribuições reais do SSP.'},
+  kwok: {name:'Kwok', label:'KWOK · ATRIBUIÇÃO PONDERADA', realSteps:false,
+    hint:'Algoritmo de 2025 para matching ponderado com pares bloqueados e grupos de tamanhos diferentes. Preserva a quantidade e pontuação ótimas do SciPy; compare os tempos no seu cenário.',
+    initial:'Inicie o cálculo para apresentar a solução encontrada pelo Kwok.'}
+};
+const algorithmInfo = (code = $('algorithm').value) => algorithms[code];
 
 function message(text, error = false) { $('message').textContent = text; $('message').className = error ? 'error' : ''; $('message').hidden = !text; }
 async function api(path, options = {}) {
@@ -49,7 +64,7 @@ function clearRun(keepComparison = false) {
   $('pair-count').textContent = '0'; $('run-status').textContent = 'Pronto para começar'; $('step-label').textContent = 'O PONTO DE PARTIDA';
   state.matrix = null; state.matrixConfig = null; state.matrixPage = 0; state.selectedCell = null; state.detailsId++; renderMatrix();
   $('pair-details').textContent = 'Clique em uma célula para ver a composição da nota ou os motivos do bloqueio.';
-  $('step-text').textContent = $('algorithm').value === 'bfs' ? 'Inicie para acompanhar as buscas e os caminhos aumentantes reais do BFS.' : 'Inicie o cálculo para apresentar a solução encontrada pelo SciPy.'; $('progress-count').textContent = '0 / 0'; $('progress-bar').style.width = '0%';
+  $('step-text').textContent = algorithmInfo().initial; $('progress-count').textContent = '0 / 0'; $('progress-bar').style.width = '0%';
   updateControls();
 }
 function updateCriteriaCount() {
@@ -234,7 +249,7 @@ function renderAllocationTimeline(result) {
     const tick = durationMs * i / 5;
     axes += `<text class="timeline-tick" x="${x(tick)}" y="${height-bottom+21}" text-anchor="middle">${number(tick/1000)} s</text>`;
   }
-  $('allocation-timeline').innerHTML = `<div class="timeline-scroll"><svg class="timeline-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Pares acumulados ao longo do tempo decorrido da apresentação"><title>Evolução da apresentação da solução</title>${axes}<path class="timeline-line" d="${path}"/>${markers}<text class="timeline-axis-label" x="${width/2}" y="${height-8}" text-anchor="middle">Tempo decorrido na apresentação</text><text class="timeline-axis-label" transform="translate(17 ${height/2}) rotate(-90)" text-anchor="middle">Pares apresentados</text></svg></div><div class="timeline-summary">Apresentação: ${number(durationMs/1000)} s, incluindo pausas. O tempo de cálculo do ${result.codigo_algoritmo === 'bfs' ? 'BFS' : 'SciPy'} (${number(result.metricas.matching_ms)} ms) é medido separadamente.</div>`;
+  $('allocation-timeline').innerHTML = `<div class="timeline-scroll"><svg class="timeline-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Pares acumulados ao longo do tempo decorrido da apresentação"><title>Evolução da apresentação da solução</title>${axes}<path class="timeline-line" d="${path}"/>${markers}<text class="timeline-axis-label" x="${width/2}" y="${height-8}" text-anchor="middle">Tempo decorrido na apresentação</text><text class="timeline-axis-label" transform="translate(17 ${height/2}) rotate(-90)" text-anchor="middle">Pares apresentados</text></svg></div><div class="timeline-summary">Apresentação: ${number(durationMs/1000)} s, incluindo pausas. O tempo de cálculo do ${algorithmInfo(result.codigo_algoritmo).name} (${number(result.metricas.matching_ms)} ms) é medido separadamente.</div>`;
 }
 
 function finish() {
@@ -247,13 +262,14 @@ function finish() {
   $('result-time').textContent = `${number(m.matching_ms)} ms`; $('result-edges').textContent = number(r.pontuacao_total);
   const ratio = r.total_tarefas ? count / r.total_tarefas : 0;
   $('distribution-chart').innerHTML = `<div class="donut-wrap"><svg width="132" height="132" viewBox="0 0 132 132" role="img" aria-label="${count} tarefas alocadas e ${r.tarefas_sem_dev.length} sem desenvolvedor"><circle cx="66" cy="66" r="47" fill="none" stroke="#eaf0e0" stroke-width="13"/><circle cx="66" cy="66" r="47" fill="none" stroke="#668b55" stroke-width="13" stroke-dasharray="${ratio * 295.31} 295.31" transform="rotate(-90 66 66)"/><text x="66" y="65" text-anchor="middle" fill="#375332" font-size="24">${number(ratio * 100)}%</text><text x="66" y="82" text-anchor="middle" fill="#95a184" font-size="9">alocadas</text></svg><div class="chart-key"><div><i style="background:#668b55"></i>${count} alocadas</div><div><i style="background:#e0e9d3"></i>${r.tarefas_sem_dev.length} sem dev</div></div></div>`;
-  const times = [['Leitura do banco', m.leitura_ms], ['Preparação da matriz', m.preparacao_ms], [r.codigo_algoritmo === 'bfs' ? 'Busca BFS e registro' : 'Cálculo SciPy', m.matching_ms]];
+  const info = algorithmInfo(r.codigo_algoritmo);
+  const times = [['Leitura do banco', m.leitura_ms], ['Preparação da matriz e do solver', m.preparacao_ms], [`Cálculo ${info.name}${info.realSteps && m.registro_passos ? ' e registro' : ''}`, m.matching_ms]];
   const max = Math.max(...times.map(t => t[1]), .001);
   $('time-chart').innerHTML = '<div class="time-bars">' + times.map(([label, value]) => `<div class="time-row"><div><span>${label}</span><span>${number(value)} ms</span></div><div class="bar-track"><div class="bar-fill" style="width:${100 * value / max}%"></div></div></div>`).join('') + '</div>';
   renderAllocationTimeline(r);
   const wallSeconds = (performance.now() - state.started) / 1000;
   const reverse = r.direcao === 'tarefas_para_devs';
-  $('results-explanation').textContent = `Sentido: ${reverse ? 'tarefas → desenvolvedores' : 'desenvolvedores → tarefas'}. ${count} pares formados entre ${r.total_devs} devs e ${r.total_tarefas} tarefas. ${r.devs_sem_tarefa.length} devs ficaram sem tarefa. ${m.arestas_validas} de ${m.arestas_possiveis} pares são compatíveis com os critérios. Pontuação total: ${number(r.pontuacao_total)}. ${r.codigo_algoritmo === 'bfs' ? 'BFS maximiza pares; os pesos só avaliam o resultado, sem guiar a busca.' : 'SciPy maximiza pares e depois a pontuação total.'} Tempo de preparação e cálculo: ${number(m.total_ms)} ms; reprodução visual: ${number(wallSeconds)} s (inclui pausas). O limite é de uma tarefa por dev no conjunto selecionado. As atribuições históricas do banco foram preservadas.`;
+  $('results-explanation').textContent = `Sentido: ${reverse ? 'tarefas → desenvolvedores' : 'desenvolvedores → tarefas'}. ${count} pares formados entre ${r.total_devs} devs e ${r.total_tarefas} tarefas. ${r.devs_sem_tarefa.length} devs ficaram sem tarefa. ${m.arestas_validas} de ${m.arestas_possiveis} pares são compatíveis com os critérios. Pontuação total: ${number(r.pontuacao_total)}. ${r.codigo_algoritmo === 'bfs' ? 'BFS maximiza pares; os pesos só avaliam o resultado, sem guiar a busca.' : `${info.name} maximiza pares e depois a pontuação total. Soluções empatadas podem conter pares diferentes.`} Tempo de preparação e cálculo: ${number(m.total_ms)} ms; reprodução visual: ${number(wallSeconds)} s (inclui pausas). O limite é de uma tarefa por dev no conjunto selecionado. As atribuições históricas do banco foram preservadas.`;
   $('allocation-list').innerHTML = r.alocacoes.map(row => `<span class="allocation-chip">${reverse ? escapeHTML(row.tarefa || row.tarefa_id) : `Dev ${row.dev_id}`} <span>→</span> ${reverse ? `Dev ${row.dev_id}` : escapeHTML(row.tarefa || row.tarefa_id)}</span>`).join('');
   renderGraph(); renderTable(); renderMatrix();
 }
@@ -329,33 +345,36 @@ $('preview-matrix').addEventListener('click',async()=>{
 });
 
 function updateAlgorithmHint() {
-  const bfs = $('algorithm').value === 'bfs';
-  $('algorithm-hint').textContent = bfs ? 'Algoritmo anterior: BFS por caminhos aumentantes. Maximiza pares; os pesos servem apenas para avaliar a solução.' : 'SciPy maximiza os pares e, entre essas soluções, a pontuação total.';
-  $('algorithm-label').textContent = bfs ? 'BFS · CAMINHOS AUMENTANTES' : 'SCIPY · SOLUÇÃO GLOBAL';
+  const info = algorithmInfo(), bfs = $('algorithm').value === 'bfs';
+  $('algorithm-hint').textContent = info.hint;
+  $('algorithm-label').textContent = info.label;
   $('objective-note').textContent = bfs ? '↳ BFS respeita as restrições e maximiza os pares. Não usa pesos para escolher as combinações. Cada dev recebe no máximo uma tarefa.' : '↳ Primeiro, maximiza os pares válidos. Entre essas soluções, maximiza a soma das notas. Cada dev recebe no máximo uma tarefa.';
-  $('animation-note').textContent = bfs ? 'A animação reproduz buscas, avaliações e caminhos aumentantes realmente registrados pelo BFS. O tempo inclui o registro dos passos; a comparação mede ambos sem esse registro.' : 'O SciPy calcula a solução completa antes da animação. Os controles apresentam os pares encontrados; não mostram operações internas do solver. Pausas não alteram o tempo de cálculo.';
+  $('animation-note').textContent = info.realSteps ? `A animação reproduz buscas e caminhos aumentantes realmente registrados pelo ${info.name}, incluindo reorganizações dos pares. O tempo inclui o registro dos passos; a comparação mede todos sem esse registro.` : `O ${info.name} calcula a solução completa antes da animação. Os controles apresentam os pares encontrados; não mostram operações internas do solver. Pausas não alteram o tempo de cálculo.`;
 }
 function renderComparison() {
   const data = state.comparison;
   $('comparison-content').hidden = !data; $('download-comparison').disabled = !data;
   if (!data) {
-    $('comparison-summary').textContent = 'Use “Comparar os dois” na configuração para calcular os dois resultados sobre os mesmos dados.';
+    $('comparison-summary').textContent = 'Use “Comparar algoritmos” na configuração para calcular os quatro resultados sobre os mesmos dados.';
     $('comparison-content').innerHTML = ''; return;
   }
-  const a = data.resultados.bfs, b = data.resultados.scipy;
-  const pairs = new Set(a.alocacoes.map(p=>`${p.dev_id}:${p.tarefa_id}`));
-  const common = b.alocacoes.filter(p=>pairs.has(`${p.dev_id}:${p.tarefa_id}`)).length;
-  $('comparison-summary').textContent = `${a.total_devs} devs e ${a.total_tarefas} tarefas, com os mesmos filtros, restrições, pesos, sentido e ordem. ${common} pares coincidem. Ganho de pontuação do SciPy: ${number(b.pontuacao_total - a.pontuacao_total)}.`;
+  const entries = Object.keys(algorithms).filter(key=>data.resultados[key]).map(key=>[key,data.resultados[key]]);
+  const reference = data.resultados.scipy;
+  const pairs = new Set(reference.alocacoes.map(p=>`${p.dev_id}:${p.tarefa_id}`));
+  const density = reference.metricas.arestas_possiveis ? 100 * reference.metricas.arestas_validas / reference.metricas.arestas_possiveis : 0;
+  $('comparison-summary').textContent = `${reference.total_devs} devs e ${reference.total_tarefas} tarefas, com os mesmos filtros, restrições, pesos, sentido e ordem. ${number(density)}% dos pares possíveis são permitidos. SciPy é a referência de quantidade e pontuação ótimas.`;
   const metrics = [
-    ['Pares formados', a.alocacoes.length, b.alocacoes.length],
-    ['Pontuação total', number(a.pontuacao_total), number(b.pontuacao_total)],
-    ['Devs sem tarefa', a.devs_sem_tarefa.length, b.devs_sem_tarefa.length],
-    ['Tarefas sem dev', a.tarefas_sem_dev.length, b.tarefas_sem_dev.length],
-    ['Cálculo sem registro de passos', `${number(a.metricas.matching_ms)} ms`, `${number(b.metricas.matching_ms)} ms`],
-    ['Preparação e cálculo', `${number(a.metricas.total_ms)} ms`, `${number(b.metricas.total_ms)} ms`]
+    ['Pares formados', r=>r.alocacoes.length],
+    ['Pontuação total', r=>number(r.pontuacao_total)],
+    ['Devs sem tarefa', r=>r.devs_sem_tarefa.length],
+    ['Tarefas sem dev', r=>r.tarefas_sem_dev.length],
+    ['Pares em comum com SciPy', r=>r.alocacoes.filter(p=>pairs.has(`${p.dev_id}:${p.tarefa_id}`)).length],
+    ['Diferença de pontuação para SciPy', r=>number(r.pontuacao_total - reference.pontuacao_total)],
+    ['Cálculo sem registro de passos', r=>`${number(r.metricas.matching_ms)} ms`],
+    ['Preparação e cálculo', r=>`${number(r.metricas.total_ms)} ms`]
   ];
-  $('comparison-content').innerHTML = '<div class="comparison-table-wrap"><table class="comparison-table"><thead><tr><th scope="col">Métrica</th><th scope="col">BFS · anterior</th><th scope="col">SciPy · ponderado</th></tr></thead><tbody>' + metrics.map(row=>`<tr><th scope="row">${row[0]}</th><td>${row[1]}</td><td>${row[2]}</td></tr>`).join('') + '</tbody></table></div><p class="comparison-note">BFS maximiza a quantidade de pares válidos. SciPy também otimiza a soma das notas entre soluções com essa quantidade. Os pesos avaliam os dois resultados, mas só orientam as escolhas do SciPy. Sem pesos, todos os pares têm nota zero e podem existir várias soluções equivalentes. Tempos medidos sem animação nem registro de passos, com uma execução por método; podem variar entre execuções.</p>' +
-    '<details class="comparison-pairs"><summary>Ver pares encontrados por cada algoritmo</summary>' + Object.entries(data.resultados).map(([key,r])=>`<p><strong>${key === 'bfs' ? 'BFS' : 'SciPy'}:</strong> ${r.alocacoes.map(p=>`Dev ${p.dev_id} → ${escapeHTML(p.tarefa || p.tarefa_id)} (${number(p.pontuacao)} pontos)`).join(' · ') || 'Nenhum par válido.'}</p>`).join('') + '</details>';
+  $('comparison-content').innerHTML = '<p class="comparison-scroll-hint">Deslize a tabela para ver todos os algoritmos →</p><div class="comparison-table-wrap" tabindex="0" aria-label="Comparação rolável dos quatro algoritmos"><table class="comparison-table"><thead><tr><th scope="col">Métrica</th>' + entries.map(([key])=>`<th scope="col">${algorithmInfo(key).name}</th>`).join('') + '</tr></thead><tbody>' + metrics.map(([label,value])=>`<tr><th scope="row">${label}</th>${entries.map(([,r])=>`<td>${value(r)}</td>`).join('')}</tr>`).join('') + '</tbody></table></div><p class="comparison-note">Todos maximizam a quantidade de pares válidos. SciPy, SSP e Kwok também maximizam a pontuação total entre soluções dessa quantidade; diferenças residuais de arredondamento podem ocorrer. Pares diferentes podem representar soluções igualmente ótimas. BFS usa as notas somente para avaliar o resultado. Kwok usa apenas pares permitidos no grafo do solver; a preparação ainda calcula a matriz completa para a interface. Compare preparação e cálculo, além do tempo do solver. Tempos medidos sem animação nem registro de passos, com uma execução por método; repita a comparação antes de escolher pelo desempenho.</p>' +
+    '<details class="comparison-pairs"><summary>Ver pares encontrados por cada algoritmo</summary>' + entries.map(([key,r])=>`<p><strong>${algorithmInfo(key).name}:</strong> ${r.alocacoes.map(p=>`Dev ${p.dev_id} → ${escapeHTML(p.tarefa || p.tarefa_id)} (${number(p.pontuacao)} pontos)`).join(' · ') || 'Nenhum par válido.'}</p>`).join('') + '</details>';
 }
 $('algorithm').addEventListener('change',()=>{clearRun(true);updateAlgorithmHint();updateDirectionHint();renderGraph();renderTable();});
 $('compare').addEventListener('click',async()=>{
@@ -376,7 +395,10 @@ $('start').addEventListener('click', startRun);
 $('next').addEventListener('click', () => { pause(); applyStep(); });
 $('reset').addEventListener('click', rewind);
 $('speed').addEventListener('change', () => { if (state.playing) { clearTimeout(state.timer); state.timer = setTimeout(tick, Number($('speed').value)); } });
-function updateDirectionHint() { const reverse = $('direction').value === 'tarefas_para_devs', bfs = $('algorithm').value === 'bfs'; $('direction-hint').textContent = bfs ? (reverse ? 'A busca BFS começa por cada tarefa, à esquerda do grafo.' : 'A busca BFS começa por cada desenvolvedor, à esquerda do grafo.') : (reverse ? 'Tarefas à esquerda do grafo; cálculo com matriz transposta. A matriz visual mantém devs nas linhas.' : 'Devs à esquerda do grafo. A apresentação segue a ordem das linhas da solução.'); }
+function updateDirectionHint() {
+  const reverse = $('direction').value === 'tarefas_para_devs', code = $('algorithm').value;
+  $('direction-hint').textContent = code === 'bfs' ? (reverse ? 'A busca BFS começa por cada tarefa, à esquerda do grafo.' : 'A busca BFS começa por cada desenvolvedor, à esquerda do grafo.') : code === 'ssp' ? (reverse ? 'O SSP busca caminhos a partir das tarefas livres, à esquerda do grafo.' : 'O SSP busca caminhos a partir dos devs livres, à esquerda do grafo.') : (reverse ? 'Tarefas à esquerda do grafo; cálculo com matriz transposta. A matriz visual mantém devs nas linhas.' : 'Devs à esquerda do grafo. A apresentação segue a ordem das linhas da solução.');
+}
 $('direction').addEventListener('change', () => { clearRun(); updateDirectionHint(); renderGraph(); renderTable(); });
 $('project').addEventListener('change', () => { populateSprints(); loadData(); });
 $('sprint').addEventListener('change', loadData);

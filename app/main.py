@@ -55,6 +55,12 @@ def load_data(config, limit=None):
     return select_participants(developers, tasks, config)
 
 
+def load_config(path):
+    config = json.loads(path.read_text(encoding='utf-8'))
+    validate_config(config)
+    return config
+
+
 def save_result(result, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
@@ -75,10 +81,7 @@ def main():
     parser.add_argument('--config', type=Path, default=ROOT / 'config/critérios.json')
     parser.add_argument('--saida', type=Path, default=ROOT / 'resultados/alocacao.json')
     args = parser.parse_args()
-    config = json.loads(args.config.read_text(encoding='utf-8'))
-    if not isinstance(config, dict):
-        raise ValueError('A configuracao deve ser um objeto JSON.')
-    validate_config(config)
+    config = load_config(args.config)
     developers, tasks = load_data(config)
     result = allocate(developers, tasks, config)
     result['projeto_id'] = config.get('projeto_id')

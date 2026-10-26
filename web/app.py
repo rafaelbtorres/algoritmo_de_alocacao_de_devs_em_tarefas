@@ -10,8 +10,8 @@ from pymysql import MySQLError
 from werkzeug.exceptions import HTTPException
 
 from app.db import connect
-from app.main import load_data, save_result
-from app.matching import allocate, validate_config, score_matrix, prepare_problem, evaluate_pair
+from app.main import load_config, load_data, save_result
+from app.matching import ALGORITHMS, allocate, validate_config, score_matrix, prepare_problem, evaluate_pair
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / 'config/critérios.json'
@@ -20,7 +20,7 @@ app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024
 
 
 def read_config():
-    return json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
+    return load_config(CONFIG_PATH)
 
 
 def payload_config():
@@ -97,10 +97,10 @@ def matrix():
 @app.post('/api/comparar')
 def compare():
     config = payload_config()
-    # Uma unica leitura fornece o mesmo recorte e a mesma ordem aos dois metodos.
+    # Uma unica leitura fornece o mesmo recorte e a mesma ordem aos quatro metodos.
     developers, tasks, elapsed = dataset(config)
     results = {}
-    for algorithm in ('bfs', 'scipy'):
+    for algorithm in ALGORITHMS:
         result = allocate(developers, tasks, {**config, 'algoritmo': algorithm}, trace=False)
         result['metricas']['leitura_ms'] = elapsed
         results[algorithm] = result
