@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const state = {config: {}, catalog: {}, devs: [], tasks: [], tab: 'tasks', result: null, runConfig: null, index: 0, pairs: [], active: null, playing: false, timer: null, busy: false, loadId: 0, started: 0, timelineEvents: [], matrix: null, matrixConfig: null, matrixPage: 0, selectedCell: null, detailsId: 0, comparison: null};
-const labels = {matriz:'MATRIZ DE PONTUAÇÕES', resolver:'SOLUÇÃO GLOBAL CALCULADA', buscar:'BUSCA POR UM PAR', avaliar:'AVALIANDO UMA CONEXÃO', ocupada:'BUSCANDO CAMINHO ALTERNATIVO', sem_par:'SEM PAR DISPONÍVEL', alocar:'PAR DA SOLUÇÃO', concluir:'APRESENTAÇÃO CONCLUÍDA'};
+const labels = {ordenar:'ORDENAÇÃO POR PONTUAÇÃO', descartar:'PAR DESCARTADO', matriz:'MATRIZ DE PONTUAÇÕES', resolver:'SOLUÇÃO GLOBAL CALCULADA', buscar:'BUSCA POR UM PAR', avaliar:'AVALIANDO UMA CONEXÃO', ocupada:'BUSCANDO CAMINHO ALTERNATIVO', sem_par:'SEM PAR DISPONÍVEL', alocar:'PAR DA SOLUÇÃO', concluir:'APRESENTAÇÃO CONCLUÍDA'};
 const number = value => Number(value).toLocaleString('pt-BR', {maximumFractionDigits: 3});
 const algorithms = {
   bfs: {name:'BFS', label:'BFS · CAMINHOS AUMENTANTES', realSteps:true,
@@ -14,6 +14,9 @@ const algorithms = {
   ssp: {name:'SSP', label:'SSP · GULOSO POR CAMINHOS', realSteps:true,
     hint:'Escolhe o caminho de menor custo e pode refazer pares anteriores. Use para acompanhar decisões reais com a mesma quantidade e pontuação ótimas do SciPy.',
     initial:'Inicie para acompanhar os caminhos de menor custo e as reatribuições reais do SSP.'},
+  greedy: {name:'Greedy Weighted Matching', label:'GREEDY WEIGHTED MATCHING', realSteps:true,
+    hint:'Aceita pares por nota decrescente, sem refazer escolhas. Pode formar menos pares ou obter pontuação menor que a ótima.',
+    initial:'Inicie para acompanhar a ordenação, as escolhas e os descartes reais do Greedy Weighted Matching.'},
   kwok: {name:'Kwok', label:'KWOK · ATRIBUIÇÃO PONDERADA', realSteps:false,
     hint:'Algoritmo de 2025 para matching ponderado com pares bloqueados e grupos de tamanhos diferentes. Preserva a quantidade e pontuação ótimas do SciPy; compare os tempos no seu cenário.',
     initial:'Inicie o cálculo para apresentar a solução encontrada pelo Kwok.'}
@@ -269,7 +272,7 @@ function finish() {
   renderAllocationTimeline(r);
   const wallSeconds = (performance.now() - state.started) / 1000;
   const reverse = r.direcao === 'tarefas_para_devs';
-  $('results-explanation').textContent = `Sentido: ${reverse ? 'tarefas → desenvolvedores' : 'desenvolvedores → tarefas'}. ${count} pares formados entre ${r.total_devs} devs e ${r.total_tarefas} tarefas. ${r.devs_sem_tarefa.length} devs ficaram sem tarefa. ${m.arestas_validas} de ${m.arestas_possiveis} pares são compatíveis com os critérios. Pontuação total: ${number(r.pontuacao_total)}. ${r.codigo_algoritmo === 'bfs' ? 'BFS maximiza pares; os pesos só avaliam o resultado, sem guiar a busca.' : `${info.name} maximiza pares e depois a pontuação total. Soluções empatadas podem conter pares diferentes.`} Tempo de preparação e cálculo: ${number(m.total_ms)} ms; reprodução visual: ${number(wallSeconds)} s (inclui pausas). O limite é de uma tarefa por dev no conjunto selecionado. As atribuições históricas do banco foram preservadas.`;
+  $('results-explanation').textContent = `Sentido: ${reverse ? 'tarefas → desenvolvedores' : 'desenvolvedores → tarefas'}. ${count} pares formados entre ${r.total_devs} devs e ${r.total_tarefas} tarefas. ${r.devs_sem_tarefa.length} devs ficaram sem tarefa. ${m.arestas_validas} de ${m.arestas_possiveis} pares são compatíveis com os critérios. Pontuação total: ${number(r.pontuacao_total)}. ${r.codigo_algoritmo === 'greedy' ? 'Greedy Weighted Matching aceita pares por nota decrescente sem reatribuições; pode formar menos pares ou obter pontuação menor que a ótima.' : r.codigo_algoritmo === 'bfs' ? 'BFS maximiza pares; os pesos só avaliam o resultado, sem guiar a busca.' : `${info.name} maximiza pares e depois a pontuação total. Soluções empatadas podem conter pares diferentes.`} Tempo de preparação e cálculo: ${number(m.total_ms)} ms; reprodução visual: ${number(wallSeconds)} s (inclui pausas). O limite é de uma tarefa por dev no conjunto selecionado. As atribuições históricas do banco foram preservadas.`;
   $('allocation-list').innerHTML = r.alocacoes.map(row => `<span class="allocation-chip">${reverse ? escapeHTML(row.tarefa || row.tarefa_id) : `Dev ${row.dev_id}`} <span>→</span> ${reverse ? `Dev ${row.dev_id}` : escapeHTML(row.tarefa || row.tarefa_id)}</span>`).join('');
   renderGraph(); renderTable(); renderMatrix();
 }
@@ -324,7 +327,7 @@ async function inspectPair(devId, taskId) {
       (data.fatores_ignorados.length ? `<p>Critério ignorado neste par por falta de dados: ${data.fatores_ignorados.map(key=>criterionNames[key]).join(', ')}. A nota considera somente os pesos com informação disponível.</p>` : '') +
       (state.matrixConfig.pesos?.habilidades > 0 || state.matrixConfig.criterios?.habilidades ?
         data.habilidades_dev_informadas && data.habilidades_tarefa_informadas ? `<p>Habilidades atendidas: ${escapeHTML(data.habilidades_atendidas.join(', ') || 'nenhuma')}. Exigidas: ${escapeHTML(data.habilidades_exigidas.join(', ') || 'nenhuma; atendimento de 100%')}.</p>` : `<p>Habilidades: ${data.habilidades_dev_informadas ? 'dev classificado' : 'áreas do dev não informadas'}; ${data.habilidades_tarefa_informadas ? 'tarefa classificada' : 'requisitos da tarefa não informados'}.</p>` : '') +
-      (state.matrixConfig.algoritmo === 'bfs' ? '<p class="matrix-cell-note">No BFS, os pesos apenas avaliam os pares: a busca não otimiza as notas. Cada dev e tarefa podem aparecer em apenas um par.</p>' : '<p class="matrix-cell-note">A maior nota individual nem sempre faz parte da melhor solução global. Cada dev e tarefa podem aparecer em apenas um par.</p>');
+      (state.matrixConfig.algoritmo === 'greedy' ? '<p class="matrix-cell-note">Greedy Weighted Matching aceita a maior nota disponível sem refazer pares. Pode formar menos pares ou obter pontuação menor que a ótima. Empates seguem a ordem do grupo à esquerda e depois do grupo à direita.</p>' : state.matrixConfig.algoritmo === 'bfs' ? '<p class="matrix-cell-note">No BFS, os pesos apenas avaliam os pares: a busca não otimiza as notas. Cada dev e tarefa podem aparecer em apenas um par.</p>' : '<p class="matrix-cell-note">A maior nota individual nem sempre faz parte da melhor solução global. Cada dev e tarefa podem aparecer em apenas um par.</p>');
   } catch(error) { if(token === state.detailsId) $('pair-details').textContent = error.message; }
 }
 $('score-matrix').addEventListener('click',event=>{
@@ -345,17 +348,17 @@ $('preview-matrix').addEventListener('click',async()=>{
 });
 
 function updateAlgorithmHint() {
-  const info = algorithmInfo(), bfs = $('algorithm').value === 'bfs';
+  const info = algorithmInfo(), bfs = $('algorithm').value === 'bfs', greedy = $('algorithm').value === 'greedy';
   $('algorithm-hint').textContent = info.hint;
   $('algorithm-label').textContent = info.label;
-  $('objective-note').textContent = bfs ? '↳ BFS respeita as restrições e maximiza os pares. Não usa pesos para escolher as combinações. Cada dev recebe no máximo uma tarefa.' : '↳ Primeiro, maximiza os pares válidos. Entre essas soluções, maximiza a soma das notas. Cada dev recebe no máximo uma tarefa.';
-  $('animation-note').textContent = info.realSteps ? `A animação reproduz buscas e caminhos aumentantes realmente registrados pelo ${info.name}, incluindo reorganizações dos pares. O tempo inclui o registro dos passos; a comparação mede todos sem esse registro.` : `O ${info.name} calcula a solução completa antes da animação. Os controles apresentam os pares encontrados; não mostram operações internas do solver. Pausas não alteram o tempo de cálculo.`;
+  $('objective-note').textContent = greedy ? '↳ Aceita pares por nota decrescente sem reatribuições. Pode formar menos pares ou obter pontuação menor que a ótima. Cada dev recebe no máximo uma tarefa.' : bfs ? '↳ BFS respeita as restrições e maximiza os pares. Não usa pesos para escolher as combinações. Cada dev recebe no máximo uma tarefa.' : '↳ Primeiro, maximiza os pares válidos. Entre essas soluções, maximiza a soma das notas. Cada dev recebe no máximo uma tarefa.';
+  $('animation-note').textContent = greedy ? 'A animação reproduz a ordenação, as escolhas e os descartes registrados pelo Greedy Weighted Matching. Não há reatribuições. O tempo inclui o registro dos passos; a comparação mede todos sem esse registro.' : info.realSteps ? `A animação reproduz buscas e caminhos aumentantes realmente registrados pelo ${info.name}, incluindo reorganizações dos pares. O tempo inclui o registro dos passos; a comparação mede todos sem esse registro.` : `O ${info.name} calcula a solução completa antes da animação. Os controles apresentam os pares encontrados; não mostram operações internas do solver. Pausas não alteram o tempo de cálculo.`;
 }
 function renderComparison() {
   const data = state.comparison;
   $('comparison-content').hidden = !data; $('download-comparison').disabled = !data;
   if (!data) {
-    $('comparison-summary').textContent = 'Use “Comparar algoritmos” na configuração para calcular os quatro resultados sobre os mesmos dados.';
+    $('comparison-summary').textContent = 'Use “Comparar algoritmos” na configuração para calcular os cinco resultados sobre os mesmos dados.';
     $('comparison-content').innerHTML = ''; return;
   }
   const entries = Object.keys(algorithms).filter(key=>data.resultados[key]).map(key=>[key,data.resultados[key]]);
@@ -373,7 +376,7 @@ function renderComparison() {
     ['Cálculo sem registro de passos', r=>`${number(r.metricas.matching_ms)} ms`],
     ['Preparação e cálculo', r=>`${number(r.metricas.total_ms)} ms`]
   ];
-  $('comparison-content').innerHTML = '<p class="comparison-scroll-hint">Deslize a tabela para ver todos os algoritmos →</p><div class="comparison-table-wrap" tabindex="0" aria-label="Comparação rolável dos quatro algoritmos"><table class="comparison-table"><thead><tr><th scope="col">Métrica</th>' + entries.map(([key])=>`<th scope="col">${algorithmInfo(key).name}</th>`).join('') + '</tr></thead><tbody>' + metrics.map(([label,value])=>`<tr><th scope="row">${label}</th>${entries.map(([,r])=>`<td>${value(r)}</td>`).join('')}</tr>`).join('') + '</tbody></table></div><p class="comparison-note">Todos maximizam a quantidade de pares válidos. SciPy, SSP e Kwok também maximizam a pontuação total entre soluções dessa quantidade; diferenças residuais de arredondamento podem ocorrer. Pares diferentes podem representar soluções igualmente ótimas. BFS usa as notas somente para avaliar o resultado. Kwok usa apenas pares permitidos no grafo do solver; a preparação ainda calcula a matriz completa para a interface. Compare preparação e cálculo, além do tempo do solver. Tempos medidos sem animação nem registro de passos, com uma execução por método; repita a comparação antes de escolher pelo desempenho.</p>' +
+  $('comparison-content').innerHTML = '<p class="comparison-scroll-hint">Deslize a tabela para ver todos os algoritmos →</p><div class="comparison-table-wrap" tabindex="0" aria-label="Comparação rolável dos cinco algoritmos"><table class="comparison-table"><thead><tr><th scope="col">Métrica</th>' + entries.map(([key])=>`<th scope="col">${algorithmInfo(key).name}</th>`).join('') + '</tr></thead><tbody>' + metrics.map(([label,value])=>`<tr><th scope="row">${label}</th>${entries.map(([,r])=>`<td>${value(r)}</td>`).join('')}</tr>`).join('') + '</tbody></table></div><p class="comparison-note">BFS, SciPy, SSP e Kwok maximizam a quantidade de pares válidos. Greedy Weighted Matching aceita pares por nota decrescente sem reatribuições e pode formar menos pares ou obter pontuação menor que a ótima. SciPy, SSP e Kwok também maximizam a pontuação total entre soluções dessa quantidade; diferenças residuais de arredondamento podem ocorrer. Pares diferentes podem representar soluções igualmente ótimas. BFS usa as notas somente para avaliar o resultado. Kwok usa apenas pares permitidos no grafo do solver; a preparação ainda calcula a matriz completa para a interface. Compare preparação e cálculo, além do tempo do solver. Tempos medidos sem animação nem registro de passos, com uma execução por método; repita a comparação antes de escolher pelo desempenho.</p>' +
     '<details class="comparison-pairs"><summary>Ver pares encontrados por cada algoritmo</summary>' + entries.map(([key,r])=>`<p><strong>${algorithmInfo(key).name}:</strong> ${r.alocacoes.map(p=>`Dev ${p.dev_id} → ${escapeHTML(p.tarefa || p.tarefa_id)} (${number(p.pontuacao)} pontos)`).join(' · ') || 'Nenhum par válido.'}</p>`).join('') + '</details>';
 }
 $('algorithm').addEventListener('change',()=>{clearRun(true);updateAlgorithmHint();updateDirectionHint();renderGraph();renderTable();});
@@ -397,7 +400,7 @@ $('reset').addEventListener('click', rewind);
 $('speed').addEventListener('change', () => { if (state.playing) { clearTimeout(state.timer); state.timer = setTimeout(tick, Number($('speed').value)); } });
 function updateDirectionHint() {
   const reverse = $('direction').value === 'tarefas_para_devs', code = $('algorithm').value;
-  $('direction-hint').textContent = code === 'bfs' ? (reverse ? 'A busca BFS começa por cada tarefa, à esquerda do grafo.' : 'A busca BFS começa por cada desenvolvedor, à esquerda do grafo.') : code === 'ssp' ? (reverse ? 'O SSP busca caminhos a partir das tarefas livres, à esquerda do grafo.' : 'O SSP busca caminhos a partir dos devs livres, à esquerda do grafo.') : (reverse ? 'Tarefas à esquerda do grafo; cálculo com matriz transposta. A matriz visual mantém devs nas linhas.' : 'Devs à esquerda do grafo. A apresentação segue a ordem das linhas da solução.');
+  $('direction-hint').textContent = code === 'greedy' ? 'Greedy Weighted Matching ordena todos os pares permitidos por nota decrescente. Empates seguem a ordem do grupo à esquerda e depois do grupo à direita; mudar o sentido pode mudar o resultado.' : code === 'bfs' ? (reverse ? 'A busca BFS começa por cada tarefa, à esquerda do grafo.' : 'A busca BFS começa por cada desenvolvedor, à esquerda do grafo.') : code === 'ssp' ? (reverse ? 'O SSP busca caminhos a partir das tarefas livres, à esquerda do grafo.' : 'O SSP busca caminhos a partir dos devs livres, à esquerda do grafo.') : (reverse ? 'Tarefas à esquerda do grafo; cálculo com matriz transposta. A matriz visual mantém devs nas linhas.' : 'Devs à esquerda do grafo. A apresentação segue a ordem das linhas da solução.');
 }
 $('direction').addEventListener('change', () => { clearRun(); updateDirectionHint(); renderGraph(); renderTable(); });
 $('project').addEventListener('change', () => { populateSprints(); loadData(); });

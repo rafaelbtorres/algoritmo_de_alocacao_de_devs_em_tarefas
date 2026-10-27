@@ -64,8 +64,8 @@ sem depender de CDNs.
 
 Na página, você pode:
 
-- Selecionar **SciPy**, **BFS (matching anterior)**, **SSP (guloso por caminhos)**
-  ou **Kwok (matching ponderado, 2025)** e escolher o sentido
+- Selecionar **SciPy**, **BFS (matching anterior)**, **SSP (guloso por caminhos)**,
+  **Kwok (matching ponderado, 2025)** ou **Greedy Weighted Matching (guloso clássico)** e escolher o sentido
   desenvolvedores → tarefas ou tarefas → desenvolvedores.
 - Usar **Comparar algoritmos** para ver quantidade de pares, pontuação total,
   participantes sem alocação e tempo de cada método no mesmo cenário. A
@@ -94,6 +94,8 @@ de busca e reorganização dos pares; o BFS também registra avaliações indivi
 O SSP registra cada busca pelo caminho de menor custo e a aplicação desse caminho,
 incluindo os pares removidos e os novos pares. O tempo real de preparação, leitura do banco e chamada
 a cada algoritmo é medido separadamente; pausas não alteram essas medições.
+No Greedy Weighted Matching, a animação registra a ordenação por nota, os pares aceitos e os
+descartados por conflito. Não há reatribuições nem garantia de solução ótima.
 Nenhum responsável histórico no MySQL é alterado. A execução web não
 sobrescreve `resultados/alocacao.json`; use o botão de download para guardar
 seu resultado. Esse arquivo local continua sendo gerado pela opção 2 do menu.
@@ -278,8 +280,8 @@ containers. `null` deixa um filtro/limite desativado; `false` desativa um crité
 
 | Variável | Comportamento quando configurada |
 | --- | --- |
-| `algoritmo` | `scipy` (padrão), `ssp` e `kwok` otimizam pares e pontuação; `bfs` maximiza somente a quantidade de pares |
-| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS e SSP define as origens da busca e no SciPy orienta a matriz; Kwok coloca internamente o menor grupo ativo à esquerda e remapeia o resultado para o sentido escolhido |
+| `algoritmo` | `scipy` (padrão), `ssp` e `kwok` otimizam pares e pontuação; `bfs` maximiza somente a quantidade de pares; `greedy` aceita pares por nota decrescente sem garantia de ótimo |
+| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS e SSP define as origens da busca, no Greedy Weighted Matching orienta o desempate e no SciPy orienta a matriz; Kwok coloca internamente o menor grupo ativo à esquerda e remapeia o resultado para o sentido escolhido |
 | `semente_embaralhamento` | `null` usa ordem por ID; um inteiro de 0 a 4294967295 reproduz uma ordem embaralhada |
 | `quantidade_devs` | Seleciona até N desenvolvedores; `null` usa todos os disponíveis no filtro |
 | `quantidade_tarefas` | Seleciona até N tarefas; `null` usa todas as disponíveis no filtro |
@@ -311,9 +313,11 @@ O botão **Embaralhar ordem** cria uma nova ordem para os dois grupos, atualiza
 o grafo e as tabelas e limpa a execução anterior. Os participantes escolhidos
 pelos filtros e quantidades continuam os mesmos. A ordem é usada nas linhas
 e colunas entregues aos solvers e na ordem das buscas e dos vizinhos.
-Os quatro preservam a quantidade máxima de pares. No SciPy, SSP e Kwok,
+BFS, SciPy, SSP e Kwok preservam a quantidade máxima de pares. No SciPy, SSP e Kwok,
 a pontuação ótima também é preservada, respeitada a precisão numérica;
 no BFS, a pontuação pode variar conforme a ordem. Pares empatados podem mudar.
+No Greedy Weighted Matching, empates seguem a ordem do grupo à esquerda e depois do grupo à
+direita; embaralhar pode mudar tanto a quantidade quanto a pontuação.
 
 Use **Restaurar ordem por ID** para desfazer. **Salvar critérios** guarda a
 semente de embaralhamento no mesmo JSON de configuração; a opção 2 do menu
@@ -330,11 +334,13 @@ Em ambos os sentidos, cada dev recebe no máximo uma tarefa e cada tarefa
 recebe no máximo um dev. A direção não habilita várias tarefas por dev ou
 vários devs por tarefa. Com os mesmos dados e critérios, a quantidade máxima
 de pares é a mesma. No SciPy, SSP e Kwok, a pontuação ótima também é a mesma; no BFS,
-a direção pode mudar os pares e sua pontuação.
+a direção pode mudar os pares e sua pontuação. No Greedy Weighted Matching, mudar a direção muda
+a prioridade nos empates e pode alterar também a quantidade de pares.
 
 As restrições estão inicialmente desativadas e os pesos começam em zero.
-Sem pesos, todos os pares permitidos têm nota zero e o objetivo é maximizar
-apenas a quantidade de alocações. Os mesmos dados, critérios e semente
+Sem pesos, todos os pares permitidos têm nota zero. Os métodos exatos maximizam
+a quantidade de alocações; Greedy Weighted Matching segue a ordem de desempate e pode formar menos pares.
+Os mesmos dados, critérios e semente
 reproduzem a ordem e o resultado na mesma versão do ambiente.
 
 Com pesos, a nota de um par permitido é:
@@ -374,7 +380,7 @@ uma lista vazia; **Não informado** remove a declaração. Na restrição obriga
 isso exige preenchimento; no peso, o componente é ignorado para os pares com
 dados incompletos. Valores salvos anteriormente continuam
 visíveis e podem ser removidos, mesmo se não fizerem parte do catálogo.
-**Salvar critérios** grava as seleções no mesmo JSON usado pelos quatro algoritmos.
+**Salvar critérios** grava as seleções no mesmo JSON usado pelos cinco algoritmos.
 
 Como o TAWOS não informa habilidades nem disponibilidade, ao ativar restrições
 obrigatórias preencha os dados manuais exigidos. O peso de habilidades aceita
@@ -394,7 +400,7 @@ Também é possível executar diretamente:
 docker compose exec app python -m app.main
 ```
 
-Existem quatro algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
+Existem cinco algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
 participantes, restrições e cálculo das notas:
 
 - **`scipy`**: [`scipy.optimize.linear_sum_assignment`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html),
@@ -409,6 +415,19 @@ participantes, restrições e cálculo das notas:
   orientar as escolhas. A pontuação é calculada para avaliar a solução. Os passos
   são registrados durante a busca (`tipo_passos: execucao_real`), com timestamps
   reais. A estrutura do grafo usa dicionários Python, sem dependência do NetworkX.
+- **`greedy` — Greedy Weighted Matching (guloso clássico por pontuação decrescente)**: ordena todos os pares
+  permitidos pela nota, da maior para a menor, e aceita cada par somente se o
+  dev e a tarefa ainda estiverem livres. Nunca desfaz uma escolha. Empates seguem
+  a ordem do grupo à esquerda e depois do grupo à direita, respeitando direção
+  e embaralhamento. Pares de nota zero também são considerados; bloqueios são
+  excluídos. Produz um matching maximal (nenhum par pode ser acrescentado sem
+  mudar escolhas), mas pode formar menos pares ou obter pontuação menor que
+  os métodos exatos. Por exemplo, notas `[[100, 99], [98, bloqueado]]` levam
+  o Greedy Weighted Matching a um único par de nota 100; SSP consegue dois pares, de notas 99 e 98.
+  A ordenação custa `O(E log E)` e a seleção `O(E)`, para `E` pares permitidos,
+  sem contar a preparação compartilhada da matriz e o registro visual dos passos.
+  Registra ordenação, alocações e descartes reais com timestamps e
+  `tipo_passos: execucao_real`.
 - **`ssp` — SSP, guloso por caminhos de menor custo**: representa os pares
   permitidos em uma rede `origem → devs → tarefas → destino` (invertida na
   direção tarefas → devs), com capacidade 1 e custo `100 - nota` em cada par.
@@ -451,6 +470,7 @@ participantes, restrições e cálculo das notas:
 | **SSP (`ssp`)** | Para acompanhar a estratégia gulosa exata e entender os caminhos de menor custo e as reatribuições. |
 | **Kwok (`kwok`)** | Para experimentar o algoritmo de 2025 em grafos com pares bloqueados e grupos de tamanhos diferentes. Compare o tempo no seu cenário. |
 | **BFS (`bfs`)** | Referência para maximizar a quantidade de pares, sem otimizar as notas. |
+| **Greedy Weighted Matching (`greedy`)** | Para comparar decisões gulosas clássicas sem reatribuições, aceitando menos pares ou pontuação menor. |
 
 SciPy, SSP e Kwok buscam a mesma quantidade máxima e a mesma pontuação
 ótima, respeitada a precisão de ponto flutuante. Se houver empate, os pares
@@ -464,19 +484,22 @@ e essa representação pode não trazer vantagem.
 Na web, escolha em **Algoritmo** e clique em **Iniciar alocação**. A opção
 **Como escolher o algoritmo** explica os usos no próprio painel. Para usar
 a mesma escolha no menu 2, clique em **Salvar critérios**. Também é possível
-editar somente `algoritmo` em `config/critérios.json` para `ssp` ou `kwok`,
+editar somente `algoritmo` em `config/critérios.json` para `ssp`, `kwok` ou `greedy`,
 preservando os demais campos. A CLI continua usando `python -m app.main`.
 
 **Comparar algoritmos** faz uma única leitura do banco e fornece o mesmo recorte,
 ordem, sentido, restrições e pesos aos métodos. Cada um executa uma vez, sem
 registro de passos e sem animação; a tabela separa tempo do cálculo e tempo
 com preparação. São medições pontuais, sujeitas à carga do ambiente, não um
-benchmark estatístico. O tempo da execução visual do BFS e SSP inclui o registro de
+benchmark estatístico. O tempo da execução visual do BFS, SSP e Greedy Weighted Matching inclui o registro de
 passos e não deve ser confundido com o tempo sem registro da comparação.
 
 O comparativo também mostra pares em comum e a diferença de pontuação.
-Os quatro devem produzir a mesma quantidade máxima; SciPy, SSP e Kwok
-buscam a melhor pontuação entre soluções dessa quantidade. O comparativo
+BFS, SciPy, SSP e Kwok devem produzir a mesma quantidade máxima; SciPy, SSP e Kwok
+buscam a melhor pontuação entre soluções dessa quantidade. Greedy Weighted Matching pode formar
+menos pares ou obter pontuação menor; sua soma pode até superar a referência
+se sacrificar quantidade, pois a referência prioriza a quantidade de pares.
+O comparativo
 usa SciPy como referência e mostra a proporção de pares permitidos, os pares
 em comum e a diferença de pontuação de cada método. Compare também o tempo
 de preparação e cálculo, pois a conversão do grafo/matriz entra na preparação.
@@ -490,7 +513,7 @@ estiverem ativos. Restrições obrigatórias, sozinhas, não acrescentam pontos.
 A mesma função atende à linha de comando e à web. **Salvar critérios** guarda
 o algoritmo escolhido em `config/critérios.json`, também usado pelo menu 2.
 O JSON de resultado identifica `codigo_algoritmo`, `algoritmo` e `objetivo`.
-O botão de download da comparação exporta os quatro resultados e a configuração.
+O botão de download da comparação exporta os cinco resultados e a configuração.
 
 ### Desenvolvimento local
 

@@ -97,7 +97,7 @@ def matrix():
 @app.post('/api/comparar')
 def compare():
     config = payload_config()
-    # Uma unica leitura fornece o mesmo recorte e a mesma ordem aos quatro metodos.
+    # Uma unica leitura fornece o mesmo recorte e a mesma ordem a todos os metodos.
     developers, tasks, elapsed = dataset(config)
     results = {}
     for algorithm in ALGORITHMS:

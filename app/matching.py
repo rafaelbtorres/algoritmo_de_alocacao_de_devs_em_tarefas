@@ -1,4 +1,4 @@
-"""Alocacao 1:1 com BFS, SciPy, SSP guloso exato ou Kwok (2025)."""
+"""Alocacao 1:1 com BFS, SciPy, SSP, Kwok (2025) ou guloso classico."""
 import math
 import random
 from collections import deque
@@ -15,6 +15,7 @@ ALGORITHMS = {
     'scipy': 'scipy.optimize.linear_sum_assignment (Jonker-Volgenant modificado)',
     'ssp': 'SSP (guloso por caminhos aumentantes de menor custo)',
     'kwok': 'kwok.kwok (Kwok, 2025)',
+    'greedy': 'Greedy Weighted Matching (guloso classico por pontuacao decrescente)',
 }
 
 
@@ -24,7 +25,7 @@ def validate_config(config):
     if config.get('direcao', 'devs_para_tarefas') not in ('devs_para_tarefas', 'tarefas_para_devs'):
         raise ValueError('direcao deve ser devs_para_tarefas ou tarefas_para_devs.')
     if not isinstance(config.get('algoritmo', 'scipy'), str) or config.get('algoritmo', 'scipy') not in ALGORITHMS:
-        raise ValueError('algoritmo deve ser scipy, bfs, ssp ou kwok.')
+        raise ValueError('algoritmo deve ser scipy, bfs, ssp, kwok ou greedy.')
     for key in ('projeto_id', 'sprint_id', 'quantidade_devs', 'quantidade_tarefas'):
         value = config.get(key)
         if value is not None and (type(value) is not int or value < 1):
@@ -125,6 +126,41 @@ def matching_with_steps(graph, left, capture=False):
     if capture:
         emit('concluir', mensagem='Busca concluida. O matching tem a maior quantidade possivel de pares validos.')
     return matches, events, checked
+
+
+def greedy_with_steps(candidates, left, right, capture=False):
+    """Aceita pares por nota decrescente sem revisar escolhas; empata pela ordem dos grupos."""
+    selected, events = [], []
+    used_left, used_right = set(), set()
+    started = perf_counter()
+
+    def emit(kind, **data):
+        if capture:
+            events.append({'tipo': kind, 'tempo_ms': (perf_counter() - started) * 1000, **data})
+
+    def pair(row, column):
+        first, second = left[row], right[column]
+        dev, task = (first, second) if first[0] == 'dev' else (second, first)
+        return {'dev_id': dev[1], 'tarefa_id': task[1]}
+
+    candidates = sorted(candidates, key=lambda edge: (-edge[0], edge[1], edge[2]))
+    emit('ordenar', mensagem='Greedy Weighted Matching: pares permitidos ordenados por nota decrescente; empates seguem a ordem do grupo a esquerda e depois do grupo a direita.')
+    for score, row, column in candidates:
+        current = pair(row, column) if capture else None
+        if row in used_left or column in used_right:
+            if capture:
+                emit('descartar', **current, pontuacao=score,
+                     mensagem='Greedy Weighted Matching: par descartado porque o dev ou a tarefa ja foi alocado; escolhas anteriores nao sao revistas.')
+            continue
+        used_left.add(row)
+        used_right.add(column)
+        selected.append((row, column))
+        if capture:
+            emit('alocar', **current, pontuacao=score,
+                 pares=[pair(i, j) for i, j in selected],
+                 mensagem=f"Greedy Weighted Matching: aceita dev {current['dev_id']} e tarefa {current['tarefa_id']}, nota {score:.2f}/100, sem reatribuicoes.")
+    emit('concluir', mensagem='Greedy Weighted Matching concluido: nenhum par pode ser acrescentado sem alterar escolhas anteriores. A quantidade de pares e a pontuacao total podem ser menores que as otimas.')
+    return selected, events
 
 
 def prepare_ssp(values):
@@ -370,6 +406,18 @@ def allocate(developers, tasks, config, trace=False):
         selected = [(i, task_indices[matches[node][1]]) for i, node in enumerate(left) if node in matches]
         if reverse:
             selected.sort(key=lambda pair: pair[1])
+    elif algorithm == 'greedy':
+        left = [('dev', d['ID']) for d in developers]
+        right = [('tarefa', t['ID']) for t in tasks]
+        origins, targets = (right, left) if reverse else (left, right)
+        oriented = values.T if reverse else values
+        candidate_rows, candidate_columns = np.nonzero(np.isfinite(oriented))
+        candidates = [(float(oriented[row, column]), int(row), int(column))
+                      for row, column in zip(candidate_rows, candidate_columns)]
+        prepared_at = perf_counter()
+        oriented_selected, events = greedy_with_steps(candidates, origins, targets, capture=trace)
+        solved_at = perf_counter()
+        selected = [(column, row) if reverse else (row, column) for row, column in oriented_selected]
     elif algorithm == 'ssp':
         left = [('dev', d['ID']) for d in developers]
         right = [('tarefa', t['ID']) for t in tasks]
@@ -436,8 +484,10 @@ def allocate(developers, tasks, config, trace=False):
     return {
         'codigo_algoritmo': algorithm,
         'algoritmo': ALGORITHMS[algorithm],
-        'objetivo': 'Maximizar quantidade de pares validos; pesos somente para avaliar o resultado.' if algorithm == 'bfs' else 'Maximizar quantidade de pares validos; depois maximizar pontuacao total.',
-        'tipo_passos': 'execucao_real' if algorithm in ('bfs', 'ssp') else 'apresentacao_da_solucao',
+        'objetivo': ('Aceitar pares validos por pontuacao decrescente, sem reatribuicoes; sem garantia de quantidade ou pontuacao otimas.' if algorithm == 'greedy'
+                     else 'Maximizar quantidade de pares validos; pesos somente para avaliar o resultado.' if algorithm == 'bfs'
+                     else 'Maximizar quantidade de pares validos; depois maximizar pontuacao total.'),
+        'tipo_passos': 'execucao_real' if algorithm in ('bfs', 'ssp', 'greedy') else 'apresentacao_da_solucao',
         'alocacoes': allocations,
         'pontuacao_total': sum(p['pontuacao'] for p in allocations),
         'devs_sem_tarefa': sorted({d['ID'] for d in developers} - used_devs),
