@@ -12,7 +12,7 @@
     <a href="#" class="brand" aria-label="Matching Lab, início"><span class="brand-icon">m<span>↗</span></span><span>matching<span class="brand-light">lab</span></span></a>
     <p class="side-caption">ALGORITMOS EM PRÁTICA</p>
     <nav aria-label="Navegação"><a href="#laboratorio" class="nav-link active"><span>⌘</span> Laboratório <small>01</small></a><a href="#dados" class="nav-link"><span>▤</span> Explorar dados <small>02</small></a><a href="#resultados" class="nav-link"><span>◷</span> Resultados <small>03</small></a></nav>
-    <div class="side-note"><span class="mini-label">COMO FUNCIONA</span><p>Pessoas de um lado.<br>Tarefas do outro.<br><strong>Conexões que fazem sentido.</strong></p><span class="tiny-line"></span><p class="muted-small">Explore as pontuações e a solução global encontrada pelo SciPy.</p></div>
+    <div class="side-note"><span class="mini-label">COMO FUNCIONA</span><p>Pessoas de um lado.<br>Tarefas do outro.<br><strong>Conexões que fazem sentido.</strong></p><span class="tiny-line"></span><p class="muted-small">Explore as pontuações e compare as escolhas de SciPy, BFS e Greedy.</p></div>
     <div class="side-bottom"><span class="status-dot" id="db-dot"></span><span id="db-status">Conectando ao banco…</span><span class="version">v1.0</span></div>
   </aside>
   <main>
@@ -30,9 +30,9 @@
         <section class="panel config-panel" aria-labelledby="config-title">
           <div class="panel-title"><h2 id="config-title">Configure o cenário</h2><span class="step-tag">01</span></div>
           <p class="panel-description">Escolha os dados e as regras para conectar os dois grupos.</p>
-          <label class="field-label" for="algorithm">Algoritmo</label><select id="algorithm"><option value="scipy">SciPy · pares e pontuação</option><option value="bfs">BFS · matching anterior</option></select>
+          <label class="field-label" for="algorithm">Algoritmo</label><select id="algorithm"><option value="scipy">SciPy · pares e pontuação</option><option value="bfs">BFS · matching anterior</option><option value="greedy">Greedy · bweight</option></select>
           <p id="algorithm-hint" class="direction-hint">SciPy maximiza os pares e, entre essas soluções, a pontuação total.</p>
-          <button id="compare" type="button" class="button secondary full">⇄ Comparar os dois</button>
+          <button id="compare" type="button" class="button secondary full">⇄ Comparar algoritmos</button>
           <label class="field-label" for="direction">Sentido da alocação</label><select id="direction"><option value="devs_para_tarefas">Desenvolvedores → Tarefas</option><option value="tarefas_para_devs">Tarefas → Desenvolvedores</option></select><p id="direction-hint" class="direction-hint">Devs nas linhas do cálculo e à esquerda do grafo.</p>
           <label class="field-label" for="project">Projeto</label><select id="project"><option value="">Todos os projetos</option></select>
           <label class="field-label" for="sprint">Sprint</label><select id="sprint"><option value="">Todas as sprints</option></select>
@@ -64,7 +64,7 @@
         </section>
       <section class="panel matrix-panel" aria-labelledby="matrix-title">
         <div class="section-heading"><div><p class="eyebrow">ENTENDA AS COMBINAÇÕES</p><h2 id="matrix-title">Matriz de pontuações</h2></div><button type="button" id="preview-matrix" class="button secondary">Calcular pontuações</button></div>
-        <p class="matrix-description">Devs nas linhas e tarefas nas colunas. Nota de 0 a 100: média ponderada dos critérios. Sem pesos, todos os pares permitidos têm nota zero. A solução considera a soma global.</p>
+        <p class="matrix-description">Devs nas linhas e tarefas nas colunas. Nota de 0 a 100: média ponderada dos critérios. Sem pesos, todos os pares permitidos têm nota zero. Cada algoritmo usa essas notas conforme sua estratégia.</p>
         <div class="matrix-legend"><span>Claro: menor nota</span><span>Escuro: maior nota</span><span>× Bloqueado</span><span>Contorno tracejado: habilidade não informada</span><span>✓ Par apresentado</span></div>
         <div id="matrix-summary" class="matrix-description" role="status">Calcule as pontuações ou inicie a alocação para visualizar a matriz.</div>
         <div id="matrix-scroll" class="matrix-scroll" tabindex="0" aria-label="Matriz rolável de pontuações"><table id="score-matrix"><thead></thead><tbody></tbody></table></div>
@@ -74,8 +74,8 @@
         </div>
       </div>
       <section class="panel comparison-panel" id="comparacao" aria-labelledby="comparison-title">
-        <div class="section-heading"><div><p class="eyebrow">MESMO CENÁRIO · DOIS MÉTODOS</p><h2 id="comparison-title">Comparação dos algoritmos</h2></div><button id="download-comparison" class="button secondary" disabled>↓ Baixar comparação</button></div>
-        <p id="comparison-summary" class="matrix-description" role="status">Use “Comparar os dois” na configuração para calcular os dois resultados sobre os mesmos dados.</p>
+        <div class="section-heading"><div><p class="eyebrow">MESMO CENÁRIO · TRÊS MÉTODOS</p><h2 id="comparison-title">Comparação dos algoritmos</h2></div><button id="download-comparison" class="button secondary" disabled>↓ Baixar comparação</button></div>
+        <p id="comparison-summary" class="matrix-description" role="status">Use “Comparar algoritmos” na configuração para calcular os três resultados sobre os mesmos dados.</p>
         <div id="comparison-content" hidden></div>
       </section>
       <section class="panel data-panel" id="dados"><div class="section-heading"><div><p class="eyebrow">CONHEÇA O SEU CENÁRIO</p><h2>Dados que alimentam as conexões</h2></div><div class="data-heading-actions"><span class="source-badge">TAWOS · MySQL</span><button type="button" id="save-data-config" class="button primary">Salvar critérios</button></div></div><div id="data-save-message" class="data-save-message" role="status" aria-live="polite" hidden></div><div class="data-toolbar"><div class="tabs" role="tablist" aria-label="Dados"><button id="tasks-tab" role="tab" aria-selected="true" class="tab active">Tarefas <span id="tasks-tab-count">0</span></button><button id="devs-tab" role="tab" aria-selected="false" class="tab">Desenvolvedores <span id="devs-tab-count">0</span></button></div><label class="search-label"><span>⌕</span><input id="search" type="search" placeholder="Buscar por título ou ID…" aria-label="Buscar dados"></label></div><div class="bulk-row"><span>Complemente os critérios manualmente, se necessário.</span><button id="fill-manual" class="button secondary">Declarar tarefas sem requisitos</button></div><p class="skill-help">Nas habilidades, selecione uma ou mais áreas. Com o peso ativo, pares sem classificação ignoram habilidades e redistribuem a nota entre os outros pesos. A restrição obrigatória de habilidades exige classificação completa.</p><div class="table-scroll"><table id="data-table"><thead></thead><tbody></tbody></table></div><div class="table-footer"><span id="table-count">0 registros</span><span>Dados manuais são usados apenas nos critérios desta simulação.</span></div></section>

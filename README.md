@@ -64,9 +64,9 @@ sem depender de CDNs.
 
 Na página, você pode:
 
-- Selecionar **SciPy** ou **BFS (matching anterior)** e escolher o sentido
+- Selecionar **SciPy**, **BFS (matching anterior)** ou **Greedy bweight** e escolher o sentido
   desenvolvedores → tarefas ou tarefas → desenvolvedores.
-- Usar **Comparar os dois** para ver quantidade de pares, pontuação total,
+- Usar **Comparar algoritmos** para ver quantidade de pares, pontuação total,
   participantes sem alocação e tempo de cada método no mesmo cenário. A
   comparação pode ser baixada em JSON; mudar critérios ou filtros a invalida.
 - Selecionar projeto/sprint, limitar quantos devs e tarefas participam e explorar
@@ -78,7 +78,7 @@ Na página, você pode:
 - Iniciar, pausar, continuar, avançar um passo, reiniciar a reprodução e ajustar
   sua velocidade. A cada alocação, o grafo mostra os pares atuais.
 - Ver a distribuição de tarefas alocadas/sem dev, tempos de leitura do banco,
-  preparação da matriz e cálculo SciPy, pontuação total e download JSON.
+  preparação do problema e cálculo do algoritmo escolhido, pontuação total e download JSON.
 - Configurar pesos de preferência de 0 a 100 para mesmo projeto, disponibilidade
   e habilidades atendidas, independentemente das restrições obrigatórias.
 - Calcular a matriz de pontuações antes da alocação, navegar em páginas de até
@@ -89,7 +89,9 @@ No modo SciPy, a solução completa é calculada no servidor. A animação apres
 finais, com pausa, avanço e repetição; ela **não reproduz operações internas**
 do solver. O gráfico de linhas usa etapas visuais, não tempos internos que a
 biblioteca não fornece. No modo BFS, a animação reproduz os passos reais
-de busca, avaliação e reorganização dos pares. O tempo real de preparação, leitura do banco e chamada
+de busca, avaliação e reorganização dos pares. No modo Greedy, reproduz a
+ordenação por pontuação, os pares aceitos e os descartes por participantes já
+alocados, sem reorganizar escolhas anteriores. O tempo real de preparação, leitura do banco e chamada
 a cada algoritmo é medido separadamente; pausas não alteram essas medições.
 Nenhum responsável histórico no MySQL é alterado. A execução web não
 sobrescreve `resultados/alocacao.json`; use o botão de download para guardar
@@ -275,8 +277,8 @@ containers. `null` deixa um filtro/limite desativado; `false` desativa um crité
 
 | Variável | Comportamento quando configurada |
 | --- | --- |
-| `algoritmo` | `scipy` (padrão) otimiza pares e pontuação; `bfs` usa o matching anterior por caminhos aumentantes |
-| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS define as origens da busca e no SciPy orienta a matriz do cálculo |
+| `algoritmo` | `scipy` (padrão) otimiza pares e pontuação; `bfs` usa caminhos aumentantes; `greedy` escolhe pares por nota decrescente (bweight) |
+| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS define as origens da busca, no SciPy orienta a matriz e no Greedy define a prioridade dos grupos no desempate |
 | `semente_embaralhamento` | `null` usa ordem por ID; um inteiro de 0 a 4294967295 reproduz uma ordem embaralhada |
 | `quantidade_devs` | Seleciona até N desenvolvedores; `null` usa todos os disponíveis no filtro |
 | `quantidade_tarefas` | Seleciona até N tarefas; `null` usa todas as disponíveis no filtro |
@@ -310,6 +312,9 @@ pelos filtros e quantidades continuam os mesmos. A ordem é usada nas linhas
 e colunas entregues ao SciPy e na ordem da busca e dos vizinhos no BFS.
 Os dois preservam a quantidade máxima de pares. No SciPy, a pontuação ótima
 também é preservada; no BFS, a pontuação pode variar conforme a ordem.
+No Greedy, a ordem desempata notas iguais: primeiro o grupo de origem,
+depois o de destino. Embaralhar pode mudar tanto os pares quanto sua quantidade
+e pontuação total; escolhas de nota maior sempre precedem as de nota menor.
 
 Use **Restaurar ordem por ID** para desfazer. **Salvar critérios** guarda a
 semente de embaralhamento no mesmo JSON de configuração; a opção 2 do menu
@@ -325,12 +330,14 @@ e o JSON registram o sentido escolhido. A escolha também pode ser salva em
 Em ambos os sentidos, cada dev recebe no máximo uma tarefa e cada tarefa
 recebe no máximo um dev. A direção não habilita várias tarefas por dev ou
 vários devs por tarefa. Com os mesmos dados e critérios, a quantidade máxima
-de pares é a mesma. No SciPy, a pontuação ótima também é a mesma; no BFS,
-a direção pode mudar os pares e sua pontuação.
+de pares é a mesma para BFS e SciPy. No SciPy, a pontuação ótima também é a mesma;
+no BFS, a direção pode mudar os pares e sua pontuação. No Greedy, a direção
+muda o desempate e pode alterar também a quantidade de pares.
 
 As restrições estão inicialmente desativadas e os pesos começam em zero.
-Sem pesos, todos os pares permitidos têm nota zero e o objetivo é maximizar
-apenas a quantidade de alocações. Os mesmos dados, critérios e semente
+Sem pesos, todos os pares permitidos têm nota zero: SciPy e BFS maximizam
+a quantidade de alocações; Greedy aceita pares livres na ordem dos participantes,
+sem garantir a quantidade máxima. Os mesmos dados, critérios e semente
 reproduzem a ordem e o resultado na mesma versão do ambiente.
 
 Com pesos, a nota de um par permitido é:
@@ -370,7 +377,7 @@ uma lista vazia; **Não informado** remove a declaração. Na restrição obriga
 isso exige preenchimento; no peso, o componente é ignorado para os pares com
 dados incompletos. Valores salvos anteriormente continuam
 visíveis e podem ser removidos, mesmo se não fizerem parte do catálogo.
-**Salvar critérios** grava as seleções no mesmo JSON usado pelos dois algoritmos.
+**Salvar critérios** grava as seleções no mesmo JSON usado pelos três algoritmos.
 
 Como o TAWOS não informa habilidades nem disponibilidade, ao ativar restrições
 obrigatórias preencha os dados manuais exigidos. O peso de habilidades aceita
@@ -423,7 +430,7 @@ valendo: `-p 3` significa até três projetos, e não o projeto de ID 3.
 Se houver menos registros disponíveis, são usados apenas os existentes.
 O matching continua limitado a uma tarefa por dev no conjunto da execução.
 
-Existem dois algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
+Existem três algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
 participantes, restrições e cálculo das notas:
 
 - **`scipy`**: [`scipy.optimize.linear_sum_assignment`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html),
@@ -438,18 +445,43 @@ participantes, restrições e cálculo das notas:
   orientar as escolhas. A pontuação é calculada para avaliar a solução. Os passos
   são registrados durante a busca (`tipo_passos: execucao_real`), com timestamps
   reais. A estrutura do grafo usa dicionários Python, sem dependência do NetworkX.
+- **`greedy`**: adaptação Python da estratégia **`bweight`** do
+  [HeiHGM/Bmatching](https://github.com/HeiHGM/Bmatching), usando a ordenação
+  estática de [`greedy_static_ordered_matching`](https://github.com/HeiHGM/Bmatching/blob/2f456c32c1d28de28b02822d48e383d769e667ea/bmatching/greedy/ordered.h)
+  e a avaliação por peso de [`Greedy::Execute`](https://github.com/HeiHGM/Bmatching/blob/2f456c32c1d28de28b02822d48e383d769e667ea/app/algorithms/greedy.h).
+  Cada par permitido é uma aresta, sua nota é o peso e cada participante tem
+  capacidade `b(v) = 1`. Ordena as arestas por nota decrescente e aceita uma
+  aresta quando seus dois participantes estão livres, sem revisar decisões.
+  Empates seguem a ordem do grupo de origem e depois a do destino, incluindo
+  o embaralhamento configurado. Notas zero continuam elegíveis; bloqueios
+  ficam fora da lista. Os passos reais (`ordenar`, `alocar`, `descartar`,
+  `concluir`) incluem timestamps e usam `tipo_passos: execucao_real`.
+  A ordenação custa `O(E log E)` e a passagem pelas arestas custa `O(E)`, para
+  `E` pares permitidos, além da preparação compartilhada da matriz.
+  A solução é maximal: nenhum par pode ser acrescentado sem mudar escolhas.
+  **Não garante quantidade máxima de pares nem pontuação total ótima.**
+  Por exemplo, notas `[[100, 99], [98, bloqueado]]` levam o Greedy a escolher
+  somente o primeiro par (100), enquanto SciPy encontra dois pares (197).
+  A adaptação usa as dependências atuais, sem compilar C++; a atribuição e a
+  licença MIT estão em [`docs/Bmatching_LICENSE.txt`](docs/Bmatching_LICENSE.txt),
+  também incluída na imagem Docker.
 
-**Comparar os dois** faz uma única leitura do banco e fornece o mesmo recorte,
+Para usar no menu 2 ou na linha de comando, configure `"algoritmo": "greedy"`
+em `config/critérios.json` ou escolha **Greedy · bweight** na interface e clique
+em **Salvar critérios**. O SciPy continua sendo o padrão quando o campo é omitido.
+
+**Comparar algoritmos** faz uma única leitura do banco e fornece o mesmo recorte,
 ordem, sentido, restrições e pesos aos métodos. Cada um executa uma vez, sem
 registro de passos e sem animação; a tabela separa tempo do cálculo e tempo
 com preparação. São medições pontuais, sujeitas à carga do ambiente, não um
-benchmark estatístico. O tempo da execução visual do BFS inclui o registro de
+benchmark estatístico. O tempo da execução visual de BFS e Greedy inclui o registro de
 passos e não deve ser confundido com o tempo sem registro da comparação.
 
-O comparativo também mostra pares em comum e a diferença de pontuação.
-Ambos devem produzir a mesma quantidade máxima; o SciPy busca a melhor
-pontuação entre soluções dessa quantidade. Sem pesos, todas as notas são
-zero, embora possam existir pares diferentes igualmente válidos. O aviso na
+O comparativo também mostra os pares de cada método e quantos coincidem com
+o SciPy. BFS e SciPy devem produzir a mesma quantidade máxima; o SciPy busca
+a melhor pontuação entre soluções dessa quantidade. Greedy pode produzir
+menos pares; avalie quantidade e pontuação em conjunto. Sem pesos, todas as notas são
+zero e Greedy ainda pode formar menos pares que os demais. O aviso na
 matriz orienta a definir pesos maiores que zero para gerar notas. Habilidades
 e disponibilidade precisam ser declaradas manualmente quando seus pesos
 estiverem ativos. Restrições obrigatórias, sozinhas, não acrescentam pontos.
@@ -457,7 +489,7 @@ estiverem ativos. Restrições obrigatórias, sozinhas, não acrescentam pontos.
 A mesma função atende à linha de comando e à web. **Salvar critérios** guarda
 o algoritmo escolhido em `config/critérios.json`, também usado pelo menu 2.
 O JSON de resultado identifica `codigo_algoritmo`, `algoritmo` e `objetivo`.
-O botão de download da comparação exporta os dois resultados e a configuração.
+O botão de download da comparação exporta os três resultados e a configuração.
 
 ### Desenvolvimento local
 

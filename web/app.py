@@ -11,7 +11,7 @@ from werkzeug.exceptions import HTTPException
 
 from app.db import connect
 from app.main import load_data, save_result
-from app.matching import allocate, validate_config, score_matrix, prepare_problem, evaluate_pair
+from app.matching import ALGORITHMS, allocate, validate_config, score_matrix, prepare_problem, evaluate_pair
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / 'config/critérios.json'
@@ -97,10 +97,10 @@ def matrix():
 @app.post('/api/comparar')
 def compare():
     config = payload_config()
-    # Uma unica leitura fornece o mesmo recorte e a mesma ordem aos dois metodos.
+    # Uma unica leitura fornece o mesmo recorte e a mesma ordem a todos os metodos.
     developers, tasks, elapsed = dataset(config)
     results = {}
-    for algorithm in ('bfs', 'scipy'):
+    for algorithm in ALGORITHMS:
         result = allocate(developers, tasks, {**config, 'algoritmo': algorithm}, trace=False)
         result['metricas']['leitura_ms'] = elapsed
         results[algorithm] = result

@@ -7,13 +7,20 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
+ALGORITHMS = {
+    'bfs': 'BFS por caminhos aumentantes',
+    'scipy': 'scipy.optimize.linear_sum_assignment (Jonker-Volgenant modificado)',
+    'greedy': 'Greedy bweight (HeiHGM/Bmatching, adaptado para Python)',
+}
+
+
 def validate_config(config):
     if not isinstance(config, dict):
         raise ValueError('A configuracao deve ser um objeto JSON.')
     if config.get('direcao', 'devs_para_tarefas') not in ('devs_para_tarefas', 'tarefas_para_devs'):
         raise ValueError('direcao deve ser devs_para_tarefas ou tarefas_para_devs.')
-    if config.get('algoritmo', 'scipy') not in ('scipy', 'bfs'):
-        raise ValueError('algoritmo deve ser scipy ou bfs.')
+    if config.get('algoritmo', 'scipy') not in tuple(ALGORITHMS):
+        raise ValueError('algoritmo deve ser scipy, bfs ou greedy.')
     for key in ('projeto_id', 'sprint_id', 'quantidade_devs', 'quantidade_tarefas'):
         value = config.get(key)
         if value is not None and (type(value) is not int or value < 1):
@@ -114,6 +121,50 @@ def matching_with_steps(graph, left, capture=False):
     if capture:
         emit('concluir', mensagem='Busca concluida. O matching tem a maior quantidade possivel de pares validos.')
     return matches, events, checked
+
+
+def greedy_with_steps(candidates, left, right, capture=False):
+    """Adapta greedy_static_ordered_matching/bweight de HeiHGM/Bmatching.
+
+    Referencia: commit 2f456c32c1d28de28b02822d48e383d769e667ea,
+    bmatching/greedy/ordered.h e app/algorithms/greedy.h.
+    Copyright (c) 2023, 2026 Henrik Reinstädtler. Licenca MIT em
+    docs/Bmatching_LICENSE.txt. Cada vertice tem capacidade b(v) = 1.
+    """
+    selected, events = [], []
+    used_left, used_right = set(), set()
+    started = perf_counter()
+
+    def emit(kind, **data):
+        if capture:
+            events.append({'tipo': kind, 'tempo_ms': (perf_counter() - started) * 1000, **data})
+
+    def pair(row, column):
+        first, second = left[row], right[column]
+        dev, task = (first, second) if first[0] == 'dev' else (second, first)
+        return {'dev_id': dev[1], 'tarefa_id': task[1]}
+
+    # O original ordena por peso decrescente. Aqui, empates seguem a ordem
+    # dos participantes: primeiro o grupo de origem, depois o de destino.
+    ordered = sorted(candidates, key=lambda edge: (-edge[0], edge[1], edge[2]))
+    emit('ordenar', mensagem='Greedy bweight: pares permitidos ordenados por pontuacao decrescente; empates seguem a ordem do grupo de origem e depois do destino.')
+    pairs = []
+    for score, row, column in ordered:
+        if row in used_left or column in used_right:
+            if capture:
+                emit('descartar', **pair(row, column), pontuacao=score,
+                     mensagem='Par descartado: o dev ou a tarefa ja foi alocado. O greedy nao revisa escolhas anteriores.')
+            continue
+        used_left.add(row)
+        used_right.add(column)
+        selected.append((row, column))
+        if capture:
+            current = pair(row, column)
+            pairs.append(current)
+            emit('alocar', **current, pontuacao=score, pares=list(pairs),
+                 mensagem=f"Greedy aceita dev {current['dev_id']} e tarefa {current['tarefa_id']}, nota {score:.2f}/100, sem reatribuicoes.")
+    emit('concluir', mensagem='Greedy concluido: nenhum par pode ser acrescentado sem alterar escolhas anteriores. Nao ha garantia de quantidade maxima de pares nem de pontuacao total otima.')
+    return selected, events
 
 
 def select_participants(developers, tasks, config):
@@ -241,6 +292,20 @@ def allocate(developers, tasks, config, trace=False):
         selected = [(i, task_indices[matches[node][1]]) for i, node in enumerate(left) if node in matches]
         if reverse:
             selected.sort(key=lambda pair: pair[1])
+    elif algorithm == 'greedy':
+        left = [('dev', d['ID']) for d in developers]
+        right = [('tarefa', t['ID']) for t in tasks]
+        oriented = values.T if reverse else values
+        if reverse:
+            left, right = right, left
+        rows, columns = np.nonzero(np.isfinite(oriented))
+        candidates = [(float(oriented[row, column]), int(row), int(column))
+                      for row, column in zip(rows, columns)]
+        prepared_at = perf_counter()
+        selected, events = greedy_with_steps(candidates, left, right, capture=trace)
+        solved_at = perf_counter()
+        if reverse:
+            selected = [(column, row) for row, column in selected]
     else:
         oriented = values.T if reverse else values
         # O bonus preserva a prioridade: quantidade de pares, depois pontuacao.
@@ -278,11 +343,16 @@ def allocate(developers, tasks, config, trace=False):
                            'pontuacao': pair['pontuacao'],
                            'mensagem': f"Par da solucao: dev {pair['dev_id']} e tarefa {pair['tarefa_id']}, nota {pair['pontuacao']:.2f}/100. A escolha considera a soma global, nao apenas a maior nota individual."})
         events.append({'tipo': 'concluir', 'mensagem': 'Apresentacao concluida: maior quantidade de pares validos e melhor pontuacao total entre essas solucoes.'})
+    objectives = {
+        'bfs': 'Maximizar quantidade de pares validos; pesos somente para avaliar o resultado.',
+        'scipy': 'Maximizar quantidade de pares validos; depois maximizar pontuacao total.',
+        'greedy': 'Escolher pares por pontuacao decrescente sem revisar escolhas; sem garantia de quantidade maxima ou pontuacao total otima.',
+    }
     return {
         'codigo_algoritmo': algorithm,
-        'algoritmo': 'BFS por caminhos aumentantes' if algorithm == 'bfs' else 'scipy.optimize.linear_sum_assignment (Jonker-Volgenant modificado)',
-        'objetivo': 'Maximizar quantidade de pares validos; pesos somente para avaliar o resultado.' if algorithm == 'bfs' else 'Maximizar quantidade de pares validos; depois maximizar pontuacao total.',
-        'tipo_passos': 'execucao_real' if algorithm == 'bfs' else 'apresentacao_da_solucao',
+        'algoritmo': ALGORITHMS[algorithm],
+        'objetivo': objectives[algorithm],
+        'tipo_passos': 'apresentacao_da_solucao' if algorithm == 'scipy' else 'execucao_real',
         'alocacoes': allocations,
         'pontuacao_total': sum(p['pontuacao'] for p in allocations),
         'devs_sem_tarefa': sorted({d['ID'] for d in developers} - used_devs),
