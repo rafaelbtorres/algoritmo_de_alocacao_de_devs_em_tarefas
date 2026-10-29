@@ -2,9 +2,10 @@
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const state = {config: {}, catalog: {}, devs: [], tasks: [], tab: 'tasks', result: null, runConfig: null, index: 0, pairs: [], active: null, playing: false, timer: null, busy: false, loadId: 0, started: 0, timelineEvents: [], matrix: null, matrixConfig: null, matrixPage: 0, selectedCell: null, detailsId: 0, comparison: null};
-const labels = {matriz:'MATRIZ DE PONTUAÇÕES', resolver:'SOLUÇÃO GLOBAL CALCULADA', ordenar:'ORDENAÇÃO POR PONTUAÇÃO', descartar:'PAR DESCARTADO', buscar:'BUSCA POR UM PAR', avaliar:'AVALIANDO UMA CONEXÃO', ocupada:'BUSCANDO CAMINHO ALTERNATIVO', sem_par:'SEM PAR DISPONÍVEL', alocar:'PAR FORMADO', concluir:'CONCLUÍDO'};
-const algorithmNames = {bfs:'BFS', scipy:'SciPy', greedy:'Greedy bweight'};
-const algorithmObjectives = {bfs:'BFS maximiza pares; os pesos só avaliam o resultado, sem guiar a busca.', scipy:'SciPy maximiza pares e depois a pontuação total.', greedy:'Greedy escolhe os pares por pontuação decrescente, sem rever escolhas. Pode formar menos pares e obter pontuação total menor que a ótima.'};
+const labels = {matriz:'MATRIZ DE PONTUAÇÕES', resolver:'SOLUÇÃO GLOBAL CALCULADA', enumerar:'ENUMERAÇÃO EXAUSTIVA', ordenar:'ORDENAÇÃO POR PONTUAÇÃO', descartar:'PAR DESCARTADO', buscar:'BUSCA POR UM PAR', avaliar:'AVALIANDO UMA CONEXÃO', ocupada:'BUSCANDO CAMINHO ALTERNATIVO', sem_par:'SEM PAR DISPONÍVEL', alocar:'PAR FORMADO', concluir:'CONCLUÍDO'};
+const bruteForceLabels = {buscar:'VISITANDO PARTICIPANTE', ocupada:'PAR IGNORADO: DESTINO OCUPADO', tentar:'ALOCAÇÃO TEMPORÁRIA', solucao:'SOLUÇÃO AVALIADA', alocar:'MELHOR SOLUÇÃO ATÉ AGORA', retroceder:'DESFAZENDO ALOCAÇÃO', sem_par:'ALTERNATIVA SEM PAR', retornar:'RETORNANDO AO NÍVEL ANTERIOR'};
+const algorithmNames = {bfs:'BFS', scipy:'SciPy', greedy:'Greedy bweight', brute_force:'Força bruta'};
+const algorithmObjectives = {bfs:'BFS maximiza pares; os pesos só avaliam o resultado, sem guiar a busca.', scipy:'SciPy maximiza pares e depois a pontuação total.', greedy:'Greedy escolhe os pares por pontuação decrescente, sem rever escolhas. Pode formar menos pares e obter pontuação total menor que a ótima.', brute_force:'Força bruta enumera todas as alocações válidas e escolhe a maior quantidade de pares; depois, a maior pontuação total.'};
 const number = value => Number(value).toLocaleString('pt-BR', {maximumFractionDigits: 3});
 
 function message(text, error = false) { $('message').textContent = text; $('message').className = error ? 'error' : ''; $('message').hidden = !text; }
@@ -51,7 +52,7 @@ function clearRun(keepComparison = false) {
   $('pair-count').textContent = '0'; $('run-status').textContent = 'Pronto para começar'; $('step-label').textContent = 'O PONTO DE PARTIDA';
   state.matrix = null; state.matrixConfig = null; state.matrixPage = 0; state.selectedCell = null; state.detailsId++; renderMatrix();
   $('pair-details').textContent = 'Clique em uma célula para ver a composição da nota ou os motivos do bloqueio.';
-  const introductions = {bfs:'Inicie para acompanhar as buscas e os caminhos aumentantes reais do BFS.', scipy:'Inicie o cálculo para apresentar a solução encontrada pelo SciPy.', greedy:'Inicie para acompanhar a ordenação e as decisões reais do greedy bweight.'};
+  const introductions = {bfs:'Inicie para acompanhar as buscas e os caminhos aumentantes reais do BFS.', scipy:'Inicie o cálculo para apresentar a solução encontrada pelo SciPy.', greedy:'Inicie para acompanhar a ordenação e as decisões reais do greedy bweight.', brute_force:'Inicie para acompanhar cada visita, tentativa, solução avaliada e retorno da força bruta.'};
   $('step-text').textContent = introductions[$('algorithm').value]; $('progress-count').textContent = '0 / 0'; $('progress-bar').style.width = '0%';
   updateControls();
 }
@@ -171,17 +172,20 @@ function renderTable() {
 function applyStep() {
   if (!state.result || state.index >= state.result.passos.length) return;
   const event = state.result.passos[state.index++];
+  const bruteForce = state.result.codigo_algoritmo === 'brute_force';
   state.active = event.tarefa_id !== undefined || event.dev_id !== undefined ? event : null;
-  if (event.tipo === 'alocar') {
-    state.pairs = event.pares; state.active = null;
+  const previousCount = state.pairs.length;
+  if (Array.isArray(event.pares)) state.pairs = event.pares;
+  if (event.tipo === 'alocar' || previousCount !== state.pairs.length) {
     state.timelineEvents.push({elapsed_ms: performance.now() - state.started, pairs: state.pairs.length});
   }
+  if (event.tipo === 'alocar') state.active = null;
   $('pair-count').textContent = state.pairs.length;
-  $('step-label').textContent = labels[event.tipo] || 'PASSO DO ALGORITMO'; $('step-text').textContent = event.mensagem;
+  $('step-label').textContent = (bruteForce && bruteForceLabels[event.tipo]) || labels[event.tipo] || 'PASSO DO ALGORITMO'; $('step-text').textContent = event.mensagem;
   $('progress-count').textContent = `${state.index} / ${state.result.passos.length}`;
   $('progress-bar').style.width = `${100 * state.index / state.result.passos.length}%`;
   $('run-status').textContent = event.tipo === 'alocar' ? `${state.pairs.length} pares formados` : state.playing ? 'Em execução' : 'Pausado';
-  if (event.tipo === 'alocar') {
+  if (event.tipo === 'alocar' || (bruteForce && state.active)) {
     const pair = event.caminho?.at(-1) || event;
     const i = state.matrix.dev_ids.indexOf(pair.dev_id), j = state.matrix.tarefa_ids.indexOf(pair.tarefa_id);
     if (i >= 0 && j >= 0) state.matrixPage = Math.floor(i / 20) * Math.ceil(state.tasks.length / 20) + Math.floor(j / 20);
@@ -219,7 +223,7 @@ function renderAllocationTimeline(result) {
   const width = 840, height = 275, left = 65, right = 25, top = 25, bottom = 55;
   const count = result.alocacoes.length;
   const timeline = result.apresentacao_tempo || {eventos: [], duracao_ms: 0};
-  const durationMs = Math.max(timeline.duracao_ms, ...timeline.eventos.map(event => event.elapsed_ms), 1);
+  const durationMs = timeline.eventos.reduce((duration, event) => Math.max(duration, event.elapsed_ms), Math.max(timeline.duracao_ms, 1));
   const x = value => left + (width - left - right) * value / durationMs;
   const y = value => top + (height - top - bottom) * (1 - value / Math.max(count, 1));
   let pairs = 0, path = `M ${x(0)} ${y(0)}`, markers = '', axes = '';
@@ -257,6 +261,7 @@ function finish() {
   const wallSeconds = (performance.now() - state.started) / 1000;
   const reverse = r.direcao === 'tarefas_para_devs';
   $('results-explanation').textContent = `Sentido: ${reverse ? 'tarefas → desenvolvedores' : 'desenvolvedores → tarefas'}. ${count} pares formados entre ${r.total_devs} devs e ${r.total_tarefas} tarefas. ${r.devs_sem_tarefa.length} devs ficaram sem tarefa. ${m.arestas_validas} de ${m.arestas_possiveis} pares são compatíveis com os critérios. Pontuação total: ${number(r.pontuacao_total)}. ${algorithmObjectives[r.codigo_algoritmo]} Tempo de preparação e cálculo: ${number(m.total_ms)} ms; reprodução visual: ${number(wallSeconds)} s (inclui pausas). O limite é de uma tarefa por dev no conjunto selecionado. As atribuições históricas do banco foram preservadas.`;
+  if (r.codigo_algoritmo === 'brute_force') $('results-explanation').textContent += ` Enumeração completa: ${number(m.solucoes_avaliadas)} soluções avaliadas em ${number(m.estados_explorados)} estados de busca.`;
   $('allocation-list').innerHTML = r.alocacoes.map(row => `<span class="allocation-chip">${reverse ? escapeHTML(row.tarefa || row.tarefa_id) : `Dev ${row.dev_id}`} <span>→</span> ${reverse ? `Dev ${row.dev_id}` : escapeHTML(row.tarefa || row.tarefa_id)}</span>`).join('');
   renderGraph(); renderTable(); renderMatrix();
 }
@@ -333,6 +338,13 @@ $('preview-matrix').addEventListener('click',async()=>{
 
 function updateAlgorithmHint() {
   const bfs = $('algorithm').value === 'bfs';
+  if ($('algorithm').value === 'brute_force') {
+    $('algorithm-hint').textContent = algorithmObjectives.brute_force + ' A busca não tem limite de estados ou passos.';
+    $('algorithm-label').textContent = 'FORÇA BRUTA · ENUMERAÇÃO EXAUSTIVA';
+    $('objective-note').textContent = '↳ Testa todas as alocações válidas, inclusive participantes sem par. Maximiza pares e depois pontuação. Cada dev recebe no máximo uma tarefa.';
+    $('animation-note').textContent = 'A reprodução mostra cada participante visitado, par tentado, destino ocupado, alocação temporária, solução avaliada, alocação desfeita e alternativa sem par. O grafo acompanha o ramo atual e apresenta a melhor solução ao concluir. O tempo inclui o registro de todos os passos. O custo cresce de forma combinatória.';
+    return;
+  }
   if ($('algorithm').value === 'greedy') {
     $('algorithm-hint').textContent = algorithmObjectives.greedy;
     $('algorithm-label').textContent = 'GREEDY · BWEIGHT';
@@ -349,10 +361,11 @@ function renderComparison() {
   const data = state.comparison;
   $('comparison-content').hidden = !data; $('download-comparison').disabled = !data;
   if (!data) {
-    $('comparison-summary').textContent = 'Use “Comparar algoritmos” na configuração para calcular os três resultados sobre os mesmos dados.';
+    $('comparison-summary').textContent = 'Use “Comparar algoritmos” para comparar os quatro métodos. Força bruta executa a busca completa, sem limite de estados.';
     $('comparison-content').innerHTML = ''; return;
   }
-  const results = ['bfs','scipy','greedy'].map(key=>data.resultados[key]);
+  const keys = Object.keys(algorithmNames);
+  const results = keys.map(key=>data.resultados[key]).filter(Boolean);
   const reference = data.resultados.scipy;
   const pairs = new Set(reference.alocacoes.map(p=>`${p.dev_id}:${p.tarefa_id}`));
   const common = results.filter(r=>r.codigo_algoritmo !== 'scipy').map(r=>`${algorithmNames[r.codigo_algoritmo]}: ${r.alocacoes.filter(p=>pairs.has(`${p.dev_id}:${p.tarefa_id}`)).length} pares em comum com SciPy`).join('; ');
@@ -363,9 +376,11 @@ function renderComparison() {
     ['Devs sem tarefa', r=>r.devs_sem_tarefa.length],
     ['Tarefas sem dev', r=>r.tarefas_sem_dev.length],
     ['Cálculo sem registro de passos', r=>`${number(r.metricas.matching_ms)} ms`],
-    ['Preparação e cálculo', r=>`${number(r.metricas.total_ms)} ms`]
+    ['Preparação e cálculo', r=>`${number(r.metricas.total_ms)} ms`],
+    ['Soluções enumeradas', r=>r.metricas.solucoes_avaliadas == null ? '—' : number(r.metricas.solucoes_avaliadas)]
   ];
-  $('comparison-content').innerHTML = '<div class="comparison-table-wrap"><table class="comparison-table"><thead><tr><th scope="col">Métrica</th>' + results.map(r=>`<th scope="col">${algorithmNames[r.codigo_algoritmo]}</th>`).join('') + '</tr></thead><tbody>' + metrics.map(([label,value])=>`<tr><th scope="row">${label}</th>${results.map(r=>`<td>${value(r)}</td>`).join('')}</tr>`).join('') + '</tbody></table></div><p class="comparison-note">BFS maximiza a quantidade de pares válidos. SciPy também otimiza a soma das notas entre soluções com essa quantidade. Greedy bweight prioriza as maiores notas individuais e não revisa escolhas; pode formar menos pares e obter pontuação menor que a ótima. Os pesos orientam SciPy e Greedy; no BFS, apenas avaliam o resultado. Sem pesos, as notas são zero e o Greedy segue a ordem dos participantes, ainda sem garantia de quantidade máxima. Tempos medidos sem animação nem registro de passos, com uma execução por método; podem variar entre execuções.</p>' +
+  const skipped = Object.entries(data.nao_executados || {}).map(([key,reason])=>`<p class="comparison-note"><strong>${escapeHTML(algorithmNames[key] || key)} não executada:</strong> ${escapeHTML(reason)}</p>`).join('');
+  $('comparison-content').innerHTML = '<div class="comparison-table-wrap"><table class="comparison-table"><thead><tr><th scope="col">Métrica</th>' + keys.map(key=>`<th scope="col">${algorithmNames[key]}${data.resultados[key] ? '' : ' · não executada'}</th>`).join('') + '</tr></thead><tbody>' + metrics.map(([label,value])=>`<tr><th scope="row">${label}</th>${keys.map(key=>`<td>${data.resultados[key] ? value(data.resultados[key]) : '—'}</td>`).join('')}</tr>`).join('') + '</tbody></table></div>' + skipped + '<p class="comparison-note">BFS maximiza a quantidade de pares válidos. SciPy também otimiza a soma das notas entre soluções com essa quantidade. Força bruta enumera todas as alocações válidas e tem o mesmo objetivo do SciPy, com custo combinatório e sem limite de estados ou passos. Greedy bweight prioriza as maiores notas individuais e não revisa escolhas; pode formar menos pares e obter pontuação menor que a ótima. Os pesos orientam SciPy, Greedy e Força bruta; no BFS, apenas avaliam o resultado. Sem pesos, as notas são zero e o Greedy segue a ordem dos participantes, ainda sem garantia de quantidade máxima. Tempos medidos sem animação nem registro de passos, com uma execução por método; podem variar entre execuções.</p>' +
     '<details class="comparison-pairs"><summary>Ver pares encontrados por cada algoritmo</summary>' + results.map(r=>`<p><strong>${algorithmNames[r.codigo_algoritmo]}:</strong> ${r.alocacoes.map(p=>`Dev ${p.dev_id} → ${escapeHTML(p.tarefa || p.tarefa_id)} (${number(p.pontuacao)} pontos)`).join(' · ') || 'Nenhum par válido.'}</p>`).join('') + '</details>';
 }
 $('algorithm').addEventListener('change',()=>{clearRun(true);updateAlgorithmHint();updateDirectionHint();renderGraph();renderTable();});
@@ -389,6 +404,10 @@ $('reset').addEventListener('click', rewind);
 $('speed').addEventListener('change', () => { if (state.playing) { clearTimeout(state.timer); state.timer = setTimeout(tick, Number($('speed').value)); } });
 function updateDirectionHint() {
   const reverse = $('direction').value === 'tarefas_para_devs', algorithm = $('algorithm').value;
+  if (algorithm === 'brute_force') {
+    $('direction-hint').textContent = `A enumeração percorre primeiro ${reverse ? 'as tarefas' : 'os devs'}, à esquerda do grafo. A direção pode mudar o desempate; a quantidade e a pontuação ótimas são preservadas.`;
+    return;
+  }
   if (algorithm === 'greedy') {
     $('direction-hint').textContent = `Pares por nota decrescente. Empates seguem primeiro a ordem ${reverse ? 'das tarefas' : 'dos devs'}, à esquerda do grafo, e depois a do outro grupo. A matriz visual mantém devs nas linhas.`;
     return;

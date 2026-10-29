@@ -104,7 +104,7 @@ def compare():
         result = allocate(developers, tasks, {**config, 'algoritmo': algorithm}, trace=False)
         result['metricas']['leitura_ms'] = elapsed
         results[algorithm] = result
-    return jsonify(resultados=results, config=config,
+    return jsonify(resultados=results, nao_executados={}, config=config,
                    observacao='Mesmos dados e criterios; tempos sem registro de passos e sem animacao. Uma execucao por metodo; os tempos podem variar.')
 
 

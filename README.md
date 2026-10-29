@@ -64,11 +64,12 @@ sem depender de CDNs.
 
 Na página, você pode:
 
-- Selecionar **SciPy**, **BFS (matching anterior)** ou **Greedy bweight** e escolher o sentido
+- Selecionar **SciPy**, **BFS (matching anterior)**, **Greedy bweight** ou **Força bruta** e escolher o sentido
   desenvolvedores → tarefas ou tarefas → desenvolvedores.
 - Usar **Comparar algoritmos** para ver quantidade de pares, pontuação total,
   participantes sem alocação e tempo de cada método no mesmo cenário. A
   comparação pode ser baixada em JSON; mudar critérios ou filtros a invalida.
+  Força bruta executa a busca completa no mesmo recorte, sem limite de estados.
 - Selecionar projeto/sprint, limitar quantos devs e tarefas participam e explorar
   o recorte do banco antes de executar.
 - Embaralhar a ordem inicial dos participantes ou restaurar a ordem por ID.
@@ -91,7 +92,13 @@ do solver. O gráfico de linhas usa etapas visuais, não tempos internos que a
 biblioteca não fornece. No modo BFS, a animação reproduz os passos reais
 de busca, avaliação e reorganização dos pares. No modo Greedy, reproduz a
 ordenação por pontuação, os pares aceitos e os descartes por participantes já
-alocados, sem reorganizar escolhas anteriores. O tempo real de preparação, leitura do banco e chamada
+alocados, sem reorganizar escolhas anteriores. Na Força bruta, a reprodução
+mostra cada participante visitado, par tentado, destino ocupado, alocação
+temporária, solução avaliada (inclusive empates e soluções inferiores),
+alocação desfeita e alternativa sem par. O grafo acompanha o ramo atual,
+incluindo os retornos, e apresenta a melhor solução ao concluir.
+Os contadores finais incluem todas as soluções avaliadas e estados explorados.
+O tempo real de preparação, leitura do banco e chamada
 a cada algoritmo é medido separadamente; pausas não alteram essas medições.
 Nenhum responsável histórico no MySQL é alterado. A execução web não
 sobrescreve `resultados/alocacao.json`; use o botão de download para guardar
@@ -277,8 +284,8 @@ containers. `null` deixa um filtro/limite desativado; `false` desativa um crité
 
 | Variável | Comportamento quando configurada |
 | --- | --- |
-| `algoritmo` | `scipy` (padrão) otimiza pares e pontuação; `bfs` usa caminhos aumentantes; `greedy` escolhe pares por nota decrescente (bweight) |
-| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS define as origens da busca, no SciPy orienta a matriz e no Greedy define a prioridade dos grupos no desempate |
+| `algoritmo` | `scipy` (padrão) otimiza pares e pontuação; `bfs` usa caminhos aumentantes; `greedy` escolhe pares por nota decrescente (bweight); `brute_force` enumera todas as alocações válidas |
+| `direcao` | Escolhe o grupo à esquerda do grafo; no BFS define as origens da busca, no SciPy orienta a matriz, no Greedy define a prioridade no desempate e na Força bruta define a ordem de enumeração |
 | `semente_embaralhamento` | `null` usa ordem por ID; um inteiro de 0 a 4294967295 reproduz uma ordem embaralhada |
 | `quantidade_devs` | Seleciona até N desenvolvedores; `null` usa todos os disponíveis no filtro |
 | `quantidade_tarefas` | Seleciona até N tarefas; `null` usa todas as disponíveis no filtro |
@@ -315,6 +322,8 @@ também é preservada; no BFS, a pontuação pode variar conforme a ordem.
 No Greedy, a ordem desempata notas iguais: primeiro o grupo de origem,
 depois o de destino. Embaralhar pode mudar tanto os pares quanto sua quantidade
 e pontuação total; escolhas de nota maior sempre precedem as de nota menor.
+Na Força bruta, a ordem define qual solução empatada é mantida; quantidade
+e pontuação ótimas são preservadas após a enumeração completa.
 
 Use **Restaurar ordem por ID** para desfazer. **Salvar critérios** guarda a
 semente de embaralhamento no mesmo JSON de configuração; a opção 2 do menu
@@ -330,12 +339,13 @@ e o JSON registram o sentido escolhido. A escolha também pode ser salva em
 Em ambos os sentidos, cada dev recebe no máximo uma tarefa e cada tarefa
 recebe no máximo um dev. A direção não habilita várias tarefas por dev ou
 vários devs por tarefa. Com os mesmos dados e critérios, a quantidade máxima
-de pares é a mesma para BFS e SciPy. No SciPy, a pontuação ótima também é a mesma;
+de pares é a mesma para BFS, SciPy e Força bruta. No SciPy e na Força bruta,
+a pontuação ótima também é a mesma;
 no BFS, a direção pode mudar os pares e sua pontuação. No Greedy, a direção
 muda o desempate e pode alterar também a quantidade de pares.
 
 As restrições estão inicialmente desativadas e os pesos começam em zero.
-Sem pesos, todos os pares permitidos têm nota zero: SciPy e BFS maximizam
+Sem pesos, todos os pares permitidos têm nota zero: SciPy, BFS e Força bruta maximizam
 a quantidade de alocações; Greedy aceita pares livres na ordem dos participantes,
 sem garantir a quantidade máxima. Os mesmos dados, critérios e semente
 reproduzem a ordem e o resultado na mesma versão do ambiente.
@@ -377,7 +387,7 @@ uma lista vazia; **Não informado** remove a declaração. Na restrição obriga
 isso exige preenchimento; no peso, o componente é ignorado para os pares com
 dados incompletos. Valores salvos anteriormente continuam
 visíveis e podem ser removidos, mesmo se não fizerem parte do catálogo.
-**Salvar critérios** grava as seleções no mesmo JSON usado pelos três algoritmos.
+**Salvar critérios** grava as seleções no mesmo JSON usado pelos quatro algoritmos.
 
 Como o TAWOS não informa habilidades nem disponibilidade, ao ativar restrições
 obrigatórias preencha os dados manuais exigidos. O peso de habilidades aceita
@@ -430,7 +440,7 @@ valendo: `-p 3` significa até três projetos, e não o projeto de ID 3.
 Se houver menos registros disponíveis, são usados apenas os existentes.
 O matching continua limitado a uma tarefa por dev no conjunto da execução.
 
-Existem três algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
+Existem quatro algoritmos selecionáveis em `algoritmo`, compartilhando seleção de
 participantes, restrições e cálculo das notas:
 
 - **`scipy`**: [`scipy.optimize.linear_sum_assignment`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html),
@@ -465,21 +475,58 @@ participantes, restrições e cálculo das notas:
   A adaptação usa as dependências atuais, sem compilar C++; a atribuição e a
   licença MIT estão em [`docs/Bmatching_LICENSE.txt`](docs/Bmatching_LICENSE.txt),
   também incluída na imagem Docker.
+- **`brute_force`**: força bruta por enumeração exaustiva com backtracking,
+  implementada em Python, sem chamar SciPy ou outro solver. Para cada
+  participante do grupo de origem, experimenta cada destino permitido e livre
+  e a alternativa de ficar sem par. Ao terminar uma combinação, compara
+  `(quantidade de pares, pontuação total)` com a melhor solução encontrada.
+  Volta atrás e continua até enumerar todas as alocações válidas, inclusive
+  as parciais e a vazia. Não faz poda por pontuação nem abandona alternativas
+  porque encontrou uma boa solução. Origens isoladas são deixadas sem par
+  diretamente, pois não oferecem outra escolha. Empates preservam a primeira
+  solução encontrada na ordem dos participantes, conforme direção e semente.
+  **Garante quantidade máxima de pares e, entre essas soluções, pontuação total
+  ótima quando a busca é executada.** No exemplo `[[100, 99], [98, bloqueado]]`,
+  encontra dois pares com pontuação 197, como o SciPy.
+  Os passos reais têm timestamps: `enumerar` inicia a busca, `buscar` visita
+  uma origem, `avaliar` tenta um par, `ocupada` registra um destino indisponível
+  no ramo atual, `tentar` aplica uma alocação temporária, `solucao` avalia cada
+  solução completa, `alocar` registra uma nova melhor solução, `retroceder`
+  desfaz uma alocação, `sem_par` explora a alternativa sem par e `retornar`
+  encerra as alternativas de uma origem. `concluir` restaura os pares da
+  melhor solução. `tipo_passos` é `execucao_real`; a reprodução inclui todos
+  os ramos, empates e soluções inferiores. As métricas adicionais são
+  `solucoes_avaliadas` e `estados_explorados`.
+
+  O custo é combinatório: sem bloqueios, existem
+  `soma(C(n, k) × C(m, k) × k!, k = 0..min(n, m))` alocações para `n` origens
+  e `m` destinos. Não há corte por quantidade estimada ou real de estados ou
+  passos: a busca enumera todas as soluções do recorte selecionado. O tempo
+  de cálculo e a memória para registrar e reproduzir os passos crescem com
+  essa enumeração. A execução visual calcula e registra a busca no servidor
+  antes de iniciar a reprodução.
 
 Para usar no menu 2 ou na linha de comando, configure `"algoritmo": "greedy"`
 em `config/critérios.json` ou escolha **Greedy · bweight** na interface e clique
 em **Salvar critérios**. O SciPy continua sendo o padrão quando o campo é omitido.
+Para Força bruta, use `"algoritmo": "brute_force"` ou selecione
+**Força bruta · exaustivo** na interface. Por exemplo, depois de configurar o
+algoritmo no JSON, execute um recorte pequeno:
+
+```bash
+docker compose exec app python app/main.py -d 5 -t 5
+```
 
 **Comparar algoritmos** faz uma única leitura do banco e fornece o mesmo recorte,
 ordem, sentido, restrições e pesos aos métodos. Cada um executa uma vez, sem
 registro de passos e sem animação; a tabela separa tempo do cálculo e tempo
 com preparação. São medições pontuais, sujeitas à carga do ambiente, não um
-benchmark estatístico. O tempo da execução visual de BFS e Greedy inclui o registro de
+benchmark estatístico. O tempo da execução visual de BFS, Greedy e Força bruta inclui o registro de
 passos e não deve ser confundido com o tempo sem registro da comparação.
 
 O comparativo também mostra os pares de cada método e quantos coincidem com
-o SciPy. BFS e SciPy devem produzir a mesma quantidade máxima; o SciPy busca
-a melhor pontuação entre soluções dessa quantidade. Greedy pode produzir
+o SciPy. BFS, SciPy e Força bruta devem produzir a mesma quantidade máxima;
+SciPy e Força bruta buscam a melhor pontuação entre soluções dessa quantidade. Greedy pode produzir
 menos pares; avalie quantidade e pontuação em conjunto. Sem pesos, todas as notas são
 zero e Greedy ainda pode formar menos pares que os demais. O aviso na
 matriz orienta a definir pesos maiores que zero para gerar notas. Habilidades
@@ -489,7 +536,9 @@ estiverem ativos. Restrições obrigatórias, sozinhas, não acrescentam pontos.
 A mesma função atende à linha de comando e à web. **Salvar critérios** guarda
 o algoritmo escolhido em `config/critérios.json`, também usado pelo menu 2.
 O JSON de resultado identifica `codigo_algoritmo`, `algoritmo` e `objetivo`.
-O botão de download da comparação exporta os três resultados e a configuração.
+O botão de download da comparação exporta os resultados e a configuração.
+A comparação executa também a Força bruta no recorte completo, sem corte por
+quantidade de estados e sem reduzir a amostra automaticamente.
 
 ### Desenvolvimento local
 

@@ -11,6 +11,7 @@ ALGORITHMS = {
     'bfs': 'BFS por caminhos aumentantes',
     'scipy': 'scipy.optimize.linear_sum_assignment (Jonker-Volgenant modificado)',
     'greedy': 'Greedy bweight (HeiHGM/Bmatching, adaptado para Python)',
+    'brute_force': 'Forca bruta por enumeracao exaustiva (backtracking)',
 }
 
 
@@ -20,7 +21,7 @@ def validate_config(config):
     if config.get('direcao', 'devs_para_tarefas') not in ('devs_para_tarefas', 'tarefas_para_devs'):
         raise ValueError('direcao deve ser devs_para_tarefas ou tarefas_para_devs.')
     if config.get('algoritmo', 'scipy') not in tuple(ALGORITHMS):
-        raise ValueError('algoritmo deve ser scipy, bfs ou greedy.')
+        raise ValueError('algoritmo deve ser scipy, bfs, greedy ou brute_force.')
     for key in ('projeto_id', 'sprint_id', 'quantidade_devs', 'quantidade_tarefas'):
         value = config.get(key)
         if value is not None and (type(value) is not int or value < 1):
@@ -167,6 +168,109 @@ def greedy_with_steps(candidates, left, right, capture=False):
     return selected, events
 
 
+def brute_force_with_steps(neighbors, left, right, capture=False):
+    """Enumera todos os matchings validos, inclusive os parciais, sem poda por nota.
+
+    Compara (quantidade, pontuacao) e preserva a primeira solucao em empates.
+    A animacao registra visitas, tentativas, solucoes e retornos de cada ramo.
+    """
+    started = perf_counter()
+    # Origens isoladas tem uma unica escolha: ficar sem par. Remove-las da
+    # recursao preserva todas as solucoes e evita profundidade desnecessaria.
+    active = [(row, edges) for row, edges in enumerate(neighbors) if edges]
+    best, current, occupied, events = [], [], set(), []
+    best_score = 0.0
+    explored = solutions = 0
+
+    def emit(kind, **data):
+        if capture:
+            events.append({'tipo': kind, 'tempo_ms': (perf_counter() - started) * 1000, **data})
+
+    def pair(row, column):
+        first, second = left[row], right[column]
+        dev, task = (first, second) if first[0] == 'dev' else (second, first)
+        return {'dev_id': dev[1], 'tarefa_id': task[1]}
+
+    def origin(row):
+        kind, identifier = left[row]
+        return {f'{kind}_id': identifier}, f'{kind} {identifier}'
+
+    def visit(position, score):
+        nonlocal best, best_score, explored, solutions
+        explored += 1
+        if position == len(active):
+            solutions += 1
+            improved = (len(current), score) > (len(best), best_score)
+            if capture:
+                if improved:
+                    comparison = 'Supera a melhor solucao encontrada.'
+                elif (len(current), score) == (len(best), best_score):
+                    comparison = 'Empata com a melhor solucao; preservando a primeira.'
+                else:
+                    comparison = 'Nao supera a melhor solucao encontrada.'
+                emit('solucao', pares=[pair(row, column) for row, column in current],
+                     pontuacao_total=score, solucoes_avaliadas=solutions, melhorou=improved,
+                     mensagem=f'Solucao {solutions} avaliada: {len(current)} pares, pontuacao {score:.2f}. {comparison}')
+            if improved:
+                best, best_score = list(current), score
+                if capture:
+                    pairs = [pair(row, column) for row, column in best]
+                    emit('alocar', **pairs[-1], pares=pairs, pontuacao_total=best_score,
+                         solucoes_avaliadas=solutions,
+                         mensagem=f'Nova melhor solucao entre {solutions} enumeradas: {len(best)} pares, pontuacao {best_score:.2f}. A busca continua e pode substituir esses pares.')
+            return
+        row, edges = active[position]
+        if capture:
+            root_field, root_label = origin(row)
+            emit('buscar', **root_field, profundidade=position,
+                 mensagem=f'Visitando {root_label}: testar cada destino permitido e a alternativa sem par.')
+        for column, weight in edges:
+            if capture:
+                current_pair = pair(row, column)
+                emit('avaliar', **current_pair, pontuacao=weight,
+                     mensagem=f"Tentando dev {current_pair['dev_id']} e tarefa {current_pair['tarefa_id']}, nota {weight:.2f}/100.")
+            if column in occupied:
+                if capture:
+                    emit('ocupada', **current_pair,
+                         mensagem='Destino ja ocupado neste ramo; ignorando este par e tentando a proxima alternativa.')
+                continue
+            occupied.add(column)
+            current.append((row, column))
+            if capture:
+                emit('tentar', **current_pair, pares=[pair(r, c) for r, c in current],
+                     pontuacao_total=score + weight,
+                     mensagem=f"Alocacao temporaria: dev {current_pair['dev_id']} e tarefa {current_pair['tarefa_id']}. Avancando neste ramo.")
+            visit(position + 1, score + weight)
+            current.pop()
+            occupied.remove(column)
+            if capture:
+                emit('retroceder', **current_pair, pares=[pair(r, c) for r, c in current],
+                     pontuacao_total=score,
+                     mensagem=f"Desfazendo dev {current_pair['dev_id']} e tarefa {current_pair['tarefa_id']}; voltando para testar outra alternativa.")
+        # Sem esta alternativa, a busca deixaria de avaliar matchings parciais.
+        if capture:
+            emit('sem_par', **root_field,
+                 mensagem=f'Explorando a alternativa de deixar {root_label} sem par neste ramo.')
+        visit(position + 1, score)
+        if capture:
+            emit('retornar', **root_field, profundidade=position,
+                 mensagem=f'Todas as alternativas de {root_label} foram exploradas; retornando ao nivel anterior.')
+
+    emit('enumerar', mensagem='Forca bruta: enumerando todas as alocacoes validas, inclusive participantes sem par. A reproducao mostra cada visita, tentativa, solucao e retorno da busca.')
+    if capture:
+        for row, edges in enumerate(neighbors):
+            if not edges:
+                root_field, root_label = origin(row)
+                emit('sem_par', **root_field,
+                     mensagem=f'{root_label} nao tem destinos permitidos e fica sem par em todas as solucoes.')
+    visit(0, 0.0)
+    if capture:
+        emit('concluir', pares=[pair(row, column) for row, column in best],
+             pontuacao_total=best_score, solucoes_avaliadas=solutions, estados_explorados=explored,
+             mensagem=f'Enumeracao completa: {solutions} solucoes avaliadas em {explored} estados. Encontrada a maior quantidade de pares e, entre essas solucoes, a maior pontuacao total.')
+    return best, events, {'estados_explorados': explored, 'solucoes_avaliadas': solutions}
+
+
 def select_participants(developers, tasks, config):
     """Seleciona os primeiros IDs e, opcionalmente, embaralha a ordem desse recorte."""
     validate_config(config)
@@ -275,6 +379,7 @@ def allocate(developers, tasks, config, trace=False):
     valid = np.isfinite(values)
     algorithm = config.get('algoritmo', 'scipy')
     events = []
+    search_metrics = {}
     if algorithm == 'bfs':
         left = [('dev', d['ID']) for d in developers]
         right = [('tarefa', t['ID']) for t in tasks]
@@ -292,17 +397,25 @@ def allocate(developers, tasks, config, trace=False):
         selected = [(i, task_indices[matches[node][1]]) for i, node in enumerate(left) if node in matches]
         if reverse:
             selected.sort(key=lambda pair: pair[1])
-    elif algorithm == 'greedy':
+    elif algorithm in ('greedy', 'brute_force'):
         left = [('dev', d['ID']) for d in developers]
         right = [('tarefa', t['ID']) for t in tasks]
         oriented = values.T if reverse else values
         if reverse:
             left, right = right, left
         rows, columns = np.nonzero(np.isfinite(oriented))
-        candidates = [(float(oriented[row, column]), int(row), int(column))
-                      for row, column in zip(rows, columns)]
+        if algorithm == 'greedy':
+            candidates = [(float(oriented[row, column]), int(row), int(column))
+                          for row, column in zip(rows, columns)]
+        else:
+            neighbors = [[] for _ in left]
+            for row, column in zip(rows, columns):
+                neighbors[int(row)].append((int(column), float(oriented[row, column])))
         prepared_at = perf_counter()
-        selected, events = greedy_with_steps(candidates, left, right, capture=trace)
+        if algorithm == 'greedy':
+            selected, events = greedy_with_steps(candidates, left, right, capture=trace)
+        else:
+            selected, events, search_metrics = brute_force_with_steps(neighbors, left, right, capture=trace)
         solved_at = perf_counter()
         if reverse:
             selected = [(column, row) for row, column in selected]
@@ -347,6 +460,7 @@ def allocate(developers, tasks, config, trace=False):
         'bfs': 'Maximizar quantidade de pares validos; pesos somente para avaliar o resultado.',
         'scipy': 'Maximizar quantidade de pares validos; depois maximizar pontuacao total.',
         'greedy': 'Escolher pares por pontuacao decrescente sem revisar escolhas; sem garantia de quantidade maxima ou pontuacao total otima.',
+        'brute_force': 'Enumerar todas as alocacoes validas; maximizar quantidade de pares e depois pontuacao total.',
     }
     return {
         'codigo_algoritmo': algorithm,
@@ -367,5 +481,5 @@ def allocate(developers, tasks, config, trace=False):
                      'matching_ms': (solved_at - prepared_at) * 1000,
                      'total_ms': (solved_at - started) * 1000,
                      'arestas_possiveis': n * m, 'arestas_validas': int(valid.sum()),
-                     'registro_passos': trace},
+                     'registro_passos': trace, **search_metrics},
     }
