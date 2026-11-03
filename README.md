@@ -546,6 +546,30 @@ repetições de códigos (`bfs`, `scipy`, `greedy`, `brute_force`). Quando omiti
 executa BFS, SciPy e Greedy. A tabela e o JSON incluem somente os métodos
 selecionados; a comparação também funciona com um único método ou sem SciPy.
 
+A linha **Big O** mostra limites superiores de tempo do cálculo do matching,
+sem preparação da matriz nem registro de passos. `n` é a quantidade de
+participantes do grupo de origem (à esquerda), `m` a do grupo de destino,
+`V = n + m` e `E` a quantidade de pares permitidos. A direção troca os grupos
+representados por `n` e `m`.
+
+| Algoritmo | Big O de tempo (pior caso) |
+|---|---|
+| BFS | `O(n · (V + E))` |
+| SciPy | `O(n² · (m + n))` |
+| Greedy bweight | `O(E log E)` |
+| Força bruta | `O(n · (m + 1)^n)` |
+
+O BFS pode fazer uma busca no grafo por origem. O Greedy ordena os `E` pares
+permitidos e os percorre uma vez. O limite do SciPy considera a matriz desta
+implementação, com `n` linhas e `m + n` colunas, incluindo os destinos fictícios
+para participantes sem par. Esse limite decorre dos laços do
+[solver retangular do SciPy](https://github.com/scipy/scipy/blob/main/scipy/optimize/rectangular_lsap/rectangular_lsap.cpp).
+Na Força bruta, `m + 1` limita as alternativas por origem (destinos e ficar sem
+par); cada melhoria pode copiar até `n` pares. É um limite conservador: destinos
+já ocupados e restrições reduzem o número de ramos percorridos. Big O descreve
+crescimento assintótico, não prevê os milissegundos de uma execução específica.
+O JSON de cada resultado inclui essa notação em `complexidade_tempo`.
+
 ### Desenvolvimento local
 
 A pasta do projeto é montada em `/workspace` no container Python. Mudanças em

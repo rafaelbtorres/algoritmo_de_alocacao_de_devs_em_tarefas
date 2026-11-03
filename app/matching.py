@@ -13,6 +13,17 @@ ALGORITHMS = {
     'greedy': 'Greedy bweight (HeiHGM/Bmatching, adaptado para Python)',
     'brute_force': 'Forca bruta por enumeracao exaustiva (backtracking)',
 }
+# Limites superiores de tempo do matching, sem preparacao da matriz ou trace.
+# n: origens; m: destinos; V = n + m; E: pares permitidos.
+# SciPy recebe n linhas e m + n colunas (n destinos ficticios sem par).
+# Forca bruta tem ate m + 1 escolhas por origem e copia ate n pares ao
+# atualizar a melhor solucao; os conflitos reduzem a arvore realmente visitada.
+ALGORITHM_TIME_COMPLEXITIES = {
+    'bfs': 'O(n · (V + E))',
+    'scipy': 'O(n² · (m + n))',
+    'greedy': 'O(E log E)',
+    'brute_force': 'O(n · (m + 1)^n)',
+}
 
 
 def validate_config(config):
@@ -465,6 +476,7 @@ def allocate(developers, tasks, config, trace=False):
     return {
         'codigo_algoritmo': algorithm,
         'algoritmo': ALGORITHMS[algorithm],
+        'complexidade_tempo': ALGORITHM_TIME_COMPLEXITIES[algorithm],
         'objetivo': objectives[algorithm],
         'tipo_passos': 'apresentacao_da_solucao' if algorithm == 'scipy' else 'execucao_real',
         'alocacoes': allocations,
