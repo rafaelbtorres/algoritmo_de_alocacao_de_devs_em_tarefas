@@ -67,9 +67,11 @@ Na página, você pode:
 - Selecionar **SciPy**, **BFS (matching anterior)**, **Greedy bweight** ou **Força bruta** e escolher o sentido
   desenvolvedores → tarefas ou tarefas → desenvolvedores.
 - Usar **Comparar algoritmos** para ver quantidade de pares, pontuação total,
-  participantes sem alocação e tempo de cada método no mesmo cenário. A
-  comparação pode ser baixada em JSON; mudar critérios ou filtros a invalida.
-  Força bruta executa a busca completa no mesmo recorte, sem limite de estados.
+  participantes sem alocação e tempo dos métodos marcados no mesmo cenário.
+  BFS, SciPy e Greedy começam marcados; Força bruta começa desmarcada.
+  A comparação pode ser baixada em JSON; mudar critérios, filtros ou métodos
+  a invalida. Quando marcada, Força bruta executa a busca completa no mesmo
+  recorte, sem limite de estados.
 - Selecionar projeto/sprint, limitar quantos devs e tarefas participam e explorar
   o recorte do banco antes de executar.
 - Embaralhar a ordem inicial dos participantes ou restaurar a ordem por ID.
@@ -518,7 +520,7 @@ docker compose exec app python app/main.py -d 5 -t 5
 ```
 
 **Comparar algoritmos** faz uma única leitura do banco e fornece o mesmo recorte,
-ordem, sentido, restrições e pesos aos métodos. Cada um executa uma vez, sem
+ordem, sentido, restrições e pesos aos métodos marcados. Cada um executa uma vez, sem
 registro de passos e sem animação; a tabela separa tempo do cálculo e tempo
 com preparação. São medições pontuais, sujeitas à carga do ambiente, não um
 benchmark estatístico. O tempo da execução visual de BFS, Greedy e Força bruta inclui o registro de
@@ -537,8 +539,12 @@ A mesma função atende à linha de comando e à web. **Salvar critérios** guar
 o algoritmo escolhido em `config/critérios.json`, também usado pelo menu 2.
 O JSON de resultado identifica `codigo_algoritmo`, `algoritmo` e `objetivo`.
 O botão de download da comparação exporta os resultados e a configuração.
-A comparação executa também a Força bruta no recorte completo, sem corte por
-quantidade de estados e sem reduzir a amostra automaticamente.
+A comparação inclui a Força bruta somente quando marcada, no recorte completo,
+sem corte por quantidade de estados e sem reduzir a amostra automaticamente.
+A API `/api/comparar` aceita `algoritmos_comparacao`, uma lista não vazia e sem
+repetições de códigos (`bfs`, `scipy`, `greedy`, `brute_force`). Quando omitida,
+executa BFS, SciPy e Greedy. A tabela e o JSON incluem somente os métodos
+selecionados; a comparação também funciona com um único método ou sem SciPy.
 
 ### Desenvolvimento local
 

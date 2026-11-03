@@ -97,10 +97,18 @@ def matrix():
 @app.post('/api/comparar')
 def compare():
     config = payload_config()
-    # Uma unica leitura fornece o mesmo recorte e a mesma ordem a todos os metodos.
+    selected = config.get('algoritmos_comparacao', ['bfs', 'scipy', 'greedy'])
+    if (not isinstance(selected, list) or not selected
+            or any(not isinstance(key, str) or key not in ALGORITHMS for key in selected)):
+        raise ValueError('Selecione ao menos um algoritmo valido para comparar.')
+    if len(set(selected)) != len(selected):
+        raise ValueError('Os algoritmos da comparacao nao podem se repetir.')
+    # Uma unica leitura fornece o mesmo recorte e a mesma ordem aos metodos selecionados.
     developers, tasks, elapsed = dataset(config)
     results = {}
     for algorithm in ALGORITHMS:
+        if algorithm not in selected:
+            continue
         result = allocate(developers, tasks, {**config, 'algoritmo': algorithm}, trace=False)
         result['metricas']['leitura_ms'] = elapsed
         results[algorithm] = result

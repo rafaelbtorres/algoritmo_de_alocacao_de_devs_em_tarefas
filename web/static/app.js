@@ -21,6 +21,9 @@ function getConfig() {
     pesos:{mesmo_projeto:Number($('weight-project').value), disponibilidade:Number($('weight-availability').value), habilidades:Number($('weight-skills').value)},
     dados_devs:state.config.dados_devs || {}, habilidades_tarefas:state.config.habilidades_tarefas || {}};
 }
+function comparisonAlgorithms() {
+  return Object.keys(algorithmNames).filter(key => $(`compare-${key}`).checked);
+}
 function populateSprints(selected = '') {
   const project = $('project').value;
   $('sprint').innerHTML = '<option value="">Todas as sprints</option>' + state.catalog.sprints.filter(s => !project || String(s.Project_ID) === project).map(s => `<option value="${s.ID}">${escapeHTML(s.Name)} · #${s.ID}</option>`).join('');
@@ -33,7 +36,7 @@ function setBusy(busy) {
   updateControls();
 }
 function updateControls() {
-  $('compare').disabled = state.busy || !state.devs.length || !state.tasks.length;
+  $('compare').disabled = state.busy || !state.devs.length || !state.tasks.length || !comparisonAlgorithms().length;
   $('preview-matrix').disabled = state.busy || !state.devs.length || !state.tasks.length;
   $('shuffle-order').disabled = state.busy || (state.devs.length < 2 && state.tasks.length < 2);
   $('restore-order').disabled = state.busy || state.config.semente_embaralhamento == null;
@@ -361,15 +364,15 @@ function renderComparison() {
   const data = state.comparison;
   $('comparison-content').hidden = !data; $('download-comparison').disabled = !data;
   if (!data) {
-    $('comparison-summary').textContent = 'Use “Comparar algoritmos” para comparar os quatro métodos. Força bruta executa a busca completa, sem limite de estados.';
+    $('comparison-summary').textContent = comparisonAlgorithms().length ? 'Use “Comparar algoritmos” para executar somente os métodos marcados.' : 'Marque ao menos um algoritmo para comparar.';
     $('comparison-content').innerHTML = ''; return;
   }
-  const keys = Object.keys(algorithmNames);
-  const results = keys.map(key=>data.resultados[key]).filter(Boolean);
-  const reference = data.resultados.scipy;
+  const keys = Object.keys(algorithmNames).filter(key=>data.resultados[key]);
+  const results = keys.map(key=>data.resultados[key]);
+  const reference = data.resultados.scipy || results[0];
   const pairs = new Set(reference.alocacoes.map(p=>`${p.dev_id}:${p.tarefa_id}`));
-  const common = results.filter(r=>r.codigo_algoritmo !== 'scipy').map(r=>`${algorithmNames[r.codigo_algoritmo]}: ${r.alocacoes.filter(p=>pairs.has(`${p.dev_id}:${p.tarefa_id}`)).length} pares em comum com SciPy`).join('; ');
-  $('comparison-summary').textContent = `${reference.total_devs} devs e ${reference.total_tarefas} tarefas, com os mesmos filtros, restrições, pesos, sentido e ordem. ${common}. Compare a quantidade de pares e a pontuação em conjunto.`;
+  const common = results.filter(r=>r !== reference).map(r=>`${algorithmNames[r.codigo_algoritmo]}: ${r.alocacoes.filter(p=>pairs.has(`${p.dev_id}:${p.tarefa_id}`)).length} pares em comum com ${algorithmNames[reference.codigo_algoritmo]}`).join('; ');
+  $('comparison-summary').textContent = `${reference.total_devs} devs e ${reference.total_tarefas} tarefas, com os mesmos filtros, restrições, pesos, sentido e ordem. ${common ? common + '. ' : ''}Compare a quantidade de pares e a pontuação em conjunto.`;
   const metrics = [
     ['Pares formados', r=>r.alocacoes.length],
     ['Pontuação total', r=>number(r.pontuacao_total)],
@@ -384,10 +387,15 @@ function renderComparison() {
     '<details class="comparison-pairs"><summary>Ver pares encontrados por cada algoritmo</summary>' + results.map(r=>`<p><strong>${algorithmNames[r.codigo_algoritmo]}:</strong> ${r.alocacoes.map(p=>`Dev ${p.dev_id} → ${escapeHTML(p.tarefa || p.tarefa_id)} (${number(p.pontuacao)} pontos)`).join(' · ') || 'Nenhum par válido.'}</p>`).join('') + '</details>';
 }
 $('algorithm').addEventListener('change',()=>{clearRun(true);updateAlgorithmHint();updateDirectionHint();renderGraph();renderTable();});
+$('comparison-algorithms').addEventListener('change',()=>{
+  state.comparison = null; renderComparison(); updateControls();
+});
 $('compare').addEventListener('click',async()=>{
+  const algorithms = comparisonAlgorithms();
+  if (!algorithms.length) return;
   pause(); setBusy(true); message(''); state.comparison = null; renderComparison();
   try {
-    state.comparison = await api('/api/comparar',{method:'POST',body:JSON.stringify(getConfig())});
+    state.comparison = await api('/api/comparar',{method:'POST',body:JSON.stringify({...getConfig(), algoritmos_comparacao:algorithms})});
     renderComparison(); $('comparacao').scrollIntoView({behavior:'smooth',block:'start'});
   } catch(error) { message(error.message,true); }
   finally { setBusy(false); }
