@@ -69,7 +69,7 @@ analyze() {
         echo '[FALTA] Instale Docker Engine com Compose v2+ ou Docker Desktop.'
         failures=$((failures + 1))
     fi
-    for tool in compose.yaml Dockerfile requirements.txt .env.example config/critérios.json app/main.py app/db.py app/matching.py web/app.py web/templates/index.html web/static/app.js web/static/style.css; do
+    for tool in compose.yaml Dockerfile requirements.txt .env.example config/critérios.json app/main.py app/benchmark.py app/db.py app/matching.py web/app.py web/templates/index.html web/static/app.js web/static/style.css; do
         if [[ -r "$ROOT/$tool" ]]; then
             printf '[OK] Arquivo %s\n' "$tool"
         else
@@ -253,6 +253,26 @@ run_allocation() {
         compose exec -T app python -m app.main
 }
 
+run_comparison() {
+    compose exec -T app python -m app.benchmark "$@"
+}
+
+comparison_menu() {
+    local source output scale repetitions
+    local -a sizes algorithms
+    read -r -p 'Entradas DEVSxTAREFAS separadas por espaco (ex.: 1x1 2x2 3x3; Enter cancela): ' -a sizes || return 0
+    (( ${#sizes[@]} )) || return 0
+    read -r -p 'Fonte: banco ou sintetico [banco]: ' source || return 0
+    read -r -p 'Algoritmos separados por espaco: bfs scipy greedy brute [bfs scipy greedy]: ' -a algorithms || return 0
+    if (( ${#algorithms[@]} == 0 )); then algorithms=(bfs scipy greedy); fi
+    read -r -p 'Execucoes por algoritmo e entrada; o grafico mostra a mediana [1]: ' repetitions || return 0
+    read -r -p 'Escala Y: auto, linear ou log [auto]: ' scale || return 0
+    read -r -p 'Saida .png, .svg ou .pdf [resultados/comparacao.png]: ' output || return 0
+    run_comparison --fonte "${source:-banco}" --entradas "${sizes[@]}" \
+        --algoritmos "${algorithms[@]}" --repeticoes "${repetitions:-1}" \
+        --escala-y "${scale:-auto}" --saida "${output:-resultados/comparacao.png}"
+}
+
 main() {
     local choice
     trap 'echo; echo "Operacao interrompida. Use a opcao 5 para verificar o ambiente."' INT
@@ -266,13 +286,14 @@ main() {
  4 - Encerrar ambiente (preserva banco)
  5 - Analisar ambiente e dependencias
  6 - Mostrar IP e porta da interface web
+ 7 - Comparar algoritmos e exportar grafico de tempos
  0 - Sair
 MENU
         read -r -p 'Escolha: ' choice || return 0
         case "$choice" in
             0) return 0 ;;
             5) analyze; continue ;;
-            1|2|3|4|6) ;;
+            1|2|3|4|6|7) ;;
             *) echo 'Opcao invalida.'; continue ;;
         esac
         check_tools || continue
@@ -283,6 +304,7 @@ MENU
             2) run_allocation ;;
             3) database_menu ;;
             6) web_access ;;
+            7) comparison_menu ;;
             4) compose down --remove-orphans && echo 'Ambiente encerrado. Banco preservado.' ;;
         esac
         if (( $? != 0 )); then echo 'Operacao falhou. Use a analise (5) e confira .env.'; fi
@@ -292,7 +314,11 @@ MENU
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
         --analisar) analyze ;;
+        --comparar)
+            shift
+            check_tools && ensure_env && check_docker && run_comparison "$@"
+            ;;
         '') main ;;
-        *) echo 'Uso: bash start.sh [--analisar]'; exit 2 ;;
+        *) echo 'Uso: bash start.sh [--analisar | --comparar --entradas 1x1 2x2 ... [opcoes]]'; exit 2 ;;
     esac
 fi

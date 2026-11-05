@@ -48,11 +48,120 @@ precisa de internet e pode demorar para baixar imagens e dependências.
 | 4 | Encerrar os containers e a rede, preservando o banco |
 | 5 | Analisar dependências e configuração do ambiente |
 | 6 | Mostrar IP, porta e endereço da interface web |
+| 7 | Comparar algoritmos em vários tamanhos e exportar gráfico de tempos |
 | 0 | Sair do menu, mantendo o estado dos containers |
 
 A opção 3 abre um menu com duas ações: **1 — Importar dataset SQL** e
 **2 — Ver acesso ao phpMyAdmin**. Use 0 para
 voltar. Para reiniciar o ambiente, escolha 4 e depois 1.
+
+### Comparar tempos de algoritmos pela linha de comando
+
+Inicie ou atualize o ambiente pela opção **1** de `bash start.sh` para instalar
+o Matplotlib. A opção **7** pergunta os tamanhos, a fonte dos dados, os
+algoritmos e o caminho de exportação. Também é possível executar diretamente:
+
+```bash
+bash start.sh --comparar --fonte banco \
+  --algoritmos bfs scipy greedy brute \
+  --entradas 1x1 2x2 3x3 --saida resultados/comparacao.png
+```
+
+Por padrão, o comando executa **uma única vez cada algoritmo em cada tamanho**.
+Use `--repeticoes 5` para executar cinco vezes cada ponto e plotar a **mediana**
+dos cinco tempos. Para quantidades pares, a mediana é a média dos dois valores
+centrais. Não há aquecimento, descarte de amostras ou execuções adicionais.
+O comando mede o tempo real do **solver** em milissegundos,
+usando a mesma medição `matching_ms` da aplicação. Leitura do banco,
+preparação da matriz/grafo, registro de passos e exportação não entram no
+tempo plotado. Os resultados refletem a máquina e a carga no momento da
+execução; uma medição isolada pode oscilar, principalmente em entradas pequenas.
+O gráfico mostra o tempo de parede medido por `perf_counter`: pausas do sistema
+e coletas de lixo que ocorram dentro do solver entram nessa medição. Por isso,
+uma entrada maior pode ocasionalmente apresentar um tempo menor em uma única
+execução; os pontos não são ajustados para produzir uma curva crescente.
+
+Junto do gráfico, o comando salva um **JSON de mesmo nome** (por exemplo,
+`resultados/comparacao.json`) com os tempos sem arredondamento, os tamanhos
+efetivos, a ordem dos IDs de cada algoritmo, quantidade de pares, pontuação,
+critérios efetivos e informações do relógio/ambiente. Para força bruta, também
+salva e mostra no terminal os **estados explorados** e as **soluções avaliadas**.
+Para BFS, registra também as **arestas examinadas**: nos mesmos casos completos
+de `1x1` a `4x4`, são **1, 3, 6 e 10**. Esse contador cresce mesmo quando um
+tempo isolado diminui por variação na medição.
+Esses contadores ajudam a distinguir crescimento do trabalho de uma pausa na
+medição. Em casos sintéticos completos, as soluções avaliadas em `1x1`,
+`2x2`, `3x3` e `4x4` são, respectivamente, **2, 7, 34 e 209**.
+O JSON é substituído junto de cada nova exportação; a coleta dessas informações
+e a gravação dos arquivos ficam fora do tempo plotado.
+No formato JSON versão 2, `execucoes` contém uma lista de todas as amostras
+por algoritmo, mesmo quando há apenas uma execução; `resultados` contém as
+medianas plotadas. `execucoes_por_ponto` e `agregacao` identificam a contagem
+e o resumo utilizados. Uma comparação com dois algoritmos, dez tamanhos e
+cinco repetições executa 100 chamadas de solver no total.
+
+O eixo X contém os tamanhos exatos no formato `devsxtarefas` (`1x1`, `2x2`,
+`3x3`), na ordem informada; também aceita tamanhos retangulares, como `2x5`.
+O eixo Y mostra o tempo do solver em **ms**, com escala automática: usa escala
+**logarítmica** quando todos os tempos são positivos e o maior é pelo menos
+100 vezes o menor; nos demais casos, usa escala linear. A escala logarítmica
+distribui o espaço por proporções (por exemplo, `0.001`, `0.01`, `0.1`, `1`,
+`10`, `100` ms), permitindo distinguir tempos pequenos mesmo quando outro
+algoritmo leva muito mais tempo. Ela não altera os valores medidos.
+Use `--escala-y linear` ou `--escala-y log` para escolher manualmente.
+Tempos iguais a zero são preservados em modo automático/linear; o modo `log`
+explícito os rejeita, pois zero não existe nessa escala. O gráfico e o JSON
+identificam a escala utilizada. Cada algoritmo
+tem uma cor fixa diferente e um marcador; a legenda fica **abaixo do gráfico**.
+O Matplotlib exporta diretamente para **PNG, SVG ou PDF**, de acordo com a
+extensão de `--saida`, sem precisar de interface gráfica.
+
+| Parâmetro | Comportamento |
+| --- | --- |
+| `--entradas 1x1 2x2 3x3` | Lista obrigatória de tamanhos positivos, sem duplicatas. |
+| `--algoritmos bfs scipy greedy brute` | Seleciona os algoritmos; padrão: `bfs scipy greedy`. `brute` e `brute_force` identificam a mesma força bruta. |
+| `--fonte banco` | Padrão: lê o MySQL uma vez e aplica critérios, pesos, direção e filtros do JSON. |
+| `--fonte sintetico` | Gera participantes em memória: todos os pares são permitidos e todos têm pontuação zero. Não acessa o banco. |
+| `--config CAMINHO` | Usa outro JSON; padrão: `config/critérios.json`. |
+| `-s N`, `--sprints N` | Sobrescreve o limite de sprints somente na fonte `banco`. |
+| `-p N`, `--projetos N` | Sobrescreve o limite de projetos somente na fonte `banco`. |
+| `--saida CAMINHO` | Padrão: `resultados/comparacao.png`; cria as pastas necessárias e substitui o gráfico anterior e o JSON de medições de mesmo nome. |
+| `--escala-y auto`, `linear` ou `log` | Padrão: `auto`; adapta o eixo Y à amplitude dos tempos. `log` usa intervalos multiplicativos, mantendo os rótulos em ms. |
+| `--repeticoes N` | Padrão: `1`; executa N vezes cada algoritmo em cada tamanho e mostra a mediana, preservando todas as amostras no JSON. |
+
+Os tamanhos informados substituem `quantidade_devs` e `quantidade_tarefas`
+do JSON somente nesta execução. Na fonte `banco`, os participantes são os
+primeiros IDs de cada recorte, com o embaralhamento configurado aplicado
+igualmente para todos os algoritmos. Se o banco filtrado não tiver registros
+suficientes para qualquer tamanho, o comando falha antes de executar os
+solvers, sem rotular um recorte menor com o tamanho solicitado.
+
+Na fonte `sintetico`, somente a direção e a semente de embaralhamento do JSON
+são utilizadas; os filtros, critérios, pesos e dados manuais são ignorados
+para garantir casos completos com notas iguais. Exemplo sem leitura do MySQL:
+
+```bash
+bash start.sh --comparar --fonte sintetico \
+  --algoritmos bfs scipy greedy brute --entradas 1x1 2x2 3x3 4x4 \
+  --saida resultados/comparacao.svg
+```
+
+A força bruta só executa quando selecionada explicitamente e faz a busca
+exaustiva completa, como na aplicação. Seu tempo cresce rapidamente com o
+tamanho; use entradas pequenas ao incluí-la. Os demais algoritmos podem
+ser comparados separadamente em entradas maiores.
+
+Também é possível invocar o módulo dentro do container:
+
+```bash
+docker compose exec -T app python -m app.benchmark --fonte sintetico \
+  --algoritmos bfs scipy greedy brute --entradas 1x1 2x2 3x3 \
+  --saida resultados/comparacao.pdf
+```
+
+Os caminhos relativos são resolvidos em `/workspace` dentro do container;
+`resultados/` fica na pasta do projeto no computador. Para ajuda, execute
+`docker compose exec -T app python -m app.benchmark --help`.
 
 ### Interface visual — Matching Lab
 

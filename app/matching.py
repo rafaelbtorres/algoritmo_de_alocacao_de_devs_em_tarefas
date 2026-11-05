@@ -274,7 +274,13 @@ def brute_force_with_steps(neighbors, left, right, capture=False):
                 root_field, root_label = origin(row)
                 emit('sem_par', **root_field,
                      mensagem=f'{root_label} nao tem destinos permitidos e fica sem par em todas as solucoes.')
-    visit(0, 0.0)
+    try:
+        visit(0, 0.0)
+    finally:
+        # A funcao recursiva referencia a propria celula de closure. Quebrar
+        # esse ciclo libera o grafo e os eventos ao fim da chamada, em vez de
+        # deixar sua limpeza para uma coleta durante outro benchmark.
+        visit = None
     if capture:
         emit('concluir', pares=[pair(row, column) for row, column in best],
              pontuacao_total=best_score, solucoes_avaliadas=solutions, estados_explorados=explored,
@@ -404,6 +410,7 @@ def allocate(developers, tasks, config, trace=False):
         prepared_at = perf_counter()
         matches, events, checked = matching_with_steps(graph, origins, capture=trace)
         solved_at = perf_counter()
+        search_metrics = {'arestas_examinadas': checked}
         task_indices = {t['ID']: j for j, t in enumerate(tasks)}
         selected = [(i, task_indices[matches[node][1]]) for i, node in enumerate(left) if node in matches]
         if reverse:
