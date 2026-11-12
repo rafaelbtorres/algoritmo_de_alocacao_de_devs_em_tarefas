@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from pymysql import MySQLError
 
+from app.complexity_fit import FIT_METHODS, fit_complexities
 from app.main import load_data, positive_integer, save_result
 from app.matching import ALGORITHMS, allocate, prepare_problem, validate_config
 
@@ -100,10 +101,10 @@ def benchmark(developers, tasks, config, sizes, algorithms, repetitions=1):
     return cases
 
 
-def resolve_y_scale(cases, algorithms, scale):
+def resolve_y_scale(cases, algorithms, scale, extra_values=()):
     if scale not in ('auto', 'linear', 'log'):
         raise ValueError('A escala Y deve ser auto, linear ou log.')
-    values = [case['resultados'][algorithm] for case in cases for algorithm in algorithms]
+    values = [case['resultados'][algorithm] for case in cases for algorithm in algorithms] + list(extra_values)
     if not values or any(not math.isfinite(value) or value < 0 for value in values):
         raise ValueError('O grafico exige tempos finitos e nao negativos.')
     if scale == 'log' and min(values) == 0:
@@ -115,7 +116,7 @@ def resolve_y_scale(cases, algorithms, scale):
     return scale
 
 
-def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=1):
+def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=1, fits=None):
     """Exporta sem display, inclusive no container, com legenda abaixo dos eixos."""
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
@@ -123,9 +124,17 @@ def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=
     from matplotlib.patches import FancyBboxPatch
     from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter, ScalarFormatter
 
-    effective_scale = resolve_y_scale(cases, algorithms, scale)
+    fits = fits or {}
+    if fits and set(fits) != set(algorithms):
+        raise ValueError('Forneca um fit para cada algoritmo selecionado.')
+    for fit in fits.values():
+        if len(fit['valores_ms']) != len(cases) or fit['entradas'] != [case['entrada'] for case in cases]:
+            raise ValueError('As entradas do fit devem corresponder as entradas do grafico.')
+    effective_scale = resolve_y_scale(cases, algorithms, scale,
+                                      (value for fit in fits.values() for value in fit['valores_ms']))
     ink, muted, border = '#17243B', '#617089', '#E3EAF3'
-    figure = Figure(figsize=(max(11.5, min(18, len(cases) * .7)), 7.5),
+    minimum_width = max(11.5, 4.25 * len(algorithms)) if fits else 11.5
+    figure = Figure(figsize=(max(minimum_width, min(18, len(cases) * .7)), 8 if fits else 7.5),
                     dpi=180, facecolor='#F5F7FB')
     FigureCanvasAgg(figure)
     figure.add_artist(FancyBboxPatch(
@@ -142,6 +151,11 @@ def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=
                   label=label, color=color, marker=marker, linewidth=2.6,
                   markersize=7.5, markeredgecolor='white', markeredgewidth=1.6,
                   solid_capstyle='round', solid_joinstyle='round', zorder=3)
+        if algorithm in fits:
+            fit = fits[algorithm]
+            axis.plot(positions, fit['valores_ms'],
+                      label=f"Fit - {label} ({fit['funcao']})", color=color,
+                      linestyle=(0, (5, 3)), linewidth=1.8, alpha=.8, zorder=2)
     axis.set_xticks(positions, [case['entrada'] for case in cases],
                     rotation=45 if len(cases) > 10 else 0)
     axis.set_xlabel('Entrada (desenvolvedores x tarefas)',
@@ -189,12 +203,16 @@ def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=
                 fontsize=10, color=muted, fontfamily='DejaVu Sans')
     note = ('Amostra única: pausas do sistema podem afetar os tempos.' if repetitions == 1
             else 'Cada ponto representa a mediana, sem execuções de aquecimento.')
+    if fits:
+        note = 'Linhas tracejadas: limites Big O ajustados; não comprovam a complexidade observada.'
+        if all(fit.get('metodo_fit') == 'log-baseline' for fit in fits.values()):
+            note = 'Fits log-space + baseline: referências Big O, não comprovação de complexidade.'
     figure.text(.065, .79, note,
                 fontsize=8, color=muted, fontfamily='DejaVu Sans')
     figure.legend(*axis.get_legend_handles_labels(), loc='lower center',
-                  bbox_to_anchor=(.5, .115), ncol=len(algorithms), frameon=False,
-                  prop={'family': 'DejaVu Sans', 'size': 10}, labelcolor=ink,
-                  handlelength=2.6, handletextpad=.8, columnspacing=2.5)
+                  bbox_to_anchor=(.5, .105 if fits else .115), ncol=len(algorithms), frameon=False,
+                  prop={'family': 'DejaVu Sans', 'size': 9 if fits else 10}, labelcolor=ink,
+                  handlelength=2.6, handletextpad=.8, columnspacing=1.8 if fits else 2.5)
     figure.add_artist(Line2D([.065, .945], [.085, .085],
                             transform=figure.transFigure, color=border, linewidth=.8))
     scale_label = 'LOGARÍTMICA' if effective_scale == 'log' else 'LINEAR'
@@ -235,6 +253,10 @@ def build_parser():
                         help='Eixo Y: auto usa log quando os tempos positivos variam pelo menos 100x (padrao: auto)')
     parser.add_argument('--repeticoes', type=positive_integer, default=1,
                         help='Execucoes por algoritmo e entrada; o grafico mostra a mediana (padrao: 1)')
+    parser.add_argument('--fit-big-o', action='store_true',
+                        help='Adiciona fits Big O com objetivo logaritmico e baseline por padrao')
+    parser.add_argument('--metodo-fit', choices=FIT_METHODS,
+                        help='Metodo dos fits: log-baseline (padrao) ou ms (ajuste original sem baseline); exige --fit-big-o')
     parser.add_argument('-s', '--sprints', type=positive_integer, help='Limite de sprints, somente na fonte banco')
     parser.add_argument('-p', '--projetos', type=positive_integer, help='Limite de projetos, somente na fonte banco')
     return parser
@@ -243,6 +265,9 @@ def build_parser():
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.metodo_fit and not args.fit_big_o:
+        parser.error('--metodo-fit exige --fit-big-o.')
+    fit_method = args.metodo_fit or 'log-baseline'
     algorithms = ['brute_force' if name == 'brute' else name for name in args.algoritmos]
     if len(set(algorithms)) != len(algorithms):
         parser.error('Selecione cada algoritmo apenas uma vez (brute e brute_force sao o mesmo solver).')
@@ -280,18 +305,35 @@ def main(argv=None):
     print(f'Medicao: solver somente, {args.repeticoes} execucao(oes) por algoritmo e entrada; sem trace ou aquecimento.')
     print('O grafico mostra a mediana dos tempos; todas as amostras sao salvas no JSON.')
     cases = benchmark(developers, tasks, config, args.entradas, algorithms, repetitions=args.repeticoes)
-    effective_scale = plot_benchmark(cases, algorithms, args.fonte, args.saida,
-                                     scale=args.escala_y, repetitions=args.repeticoes)
     measurements = args.saida.with_suffix('.json')
-    save_result({
+    report = {
         'fonte': args.fonte, 'algoritmos': algorithms, 'metrica': 'matching_ms', 'unidade': 'ms',
-        'escala_y': effective_scale, 'escala_y_solicitada': args.escala_y,
+        'escala_y': None, 'escala_y_solicitada': args.escala_y,
+        'fit_big_o': args.fit_big_o, 'metodo_fit': fit_method if args.fit_big_o else None,
+        'estado_fit': 'pendente' if args.fit_big_o else 'desativado', 'ajustes_big_o': {},
         'formato_versao': 2, 'agregacao': 'mediana', 'execucoes_por_ponto': args.repeticoes,
         'aquecimento': False, 'configuracao_efetiva': config,
         'ambiente': {'python': platform.python_version(), 'sistema': platform.system(),
                      'arquitetura': platform.machine(), 'relogio': vars(get_clock_info('perf_counter'))},
         'entradas': cases,
-    }, measurements)
+    }
+    # Preserva as amostras antes do ajuste/renderizacao: uma falha no fit nao
+    # deve perder os resultados de buscas exaustivas que levaram varios minutos.
+    save_result(report, measurements)
+    try:
+        fits = (fit_complexities(cases, algorithms, config.get('direcao', 'devs_para_tarefas'), method=fit_method)
+                if args.fit_big_o else {})
+    except ValueError as error:
+        report.update(estado_fit='erro', erro_fit=str(error))
+        save_result(report, measurements)
+        print(f'Medicoes preservadas em: {measurements.resolve()}', file=sys.stderr)
+        raise
+    report['ajustes_big_o'] = fits
+    report['estado_fit'] = 'concluido' if fits else 'desativado'
+    effective_scale = plot_benchmark(cases, algorithms, args.fonte, args.saida,
+                                     scale=args.escala_y, repetitions=args.repeticoes, fits=fits)
+    report['escala_y'] = effective_scale
+    save_result(report, measurements)
     print(f'Grafico salvo em: {args.saida.resolve()}')
     print(f'Escala do eixo Y: {effective_scale}')
     print(f'Medicoes e contadores salvos em: {measurements.resolve()}')

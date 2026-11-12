@@ -69,7 +69,7 @@ analyze() {
         echo '[FALTA] Instale Docker Engine com Compose v2+ ou Docker Desktop.'
         failures=$((failures + 1))
     fi
-    for tool in compose.yaml Dockerfile requirements.txt .env.example config/critérios.json app/main.py app/benchmark.py app/db.py app/matching.py web/app.py web/templates/index.html web/static/app.js web/static/style.css; do
+    for tool in compose.yaml Dockerfile requirements.txt .env.example config/critérios.json app/main.py app/benchmark.py app/complexity_fit.py app/db.py app/matching.py web/app.py web/templates/index.html web/static/app.js web/static/style.css; do
         if [[ -r "$ROOT/$tool" ]]; then
             printf '[OK] Arquivo %s\n' "$tool"
         else
@@ -258,8 +258,8 @@ run_comparison() {
 }
 
 comparison_menu() {
-    local source output scale repetitions
-    local -a sizes algorithms
+    local source output scale repetitions fit fit_method
+    local -a sizes algorithms fit_options=()
     read -r -p 'Entradas DEVSxTAREFAS separadas por espaco (ex.: 1x1 2x2 3x3; Enter cancela): ' -a sizes || return 0
     (( ${#sizes[@]} )) || return 0
     read -r -p 'Fonte: banco ou sintetico [banco]: ' source || return 0
@@ -267,10 +267,22 @@ comparison_menu() {
     if (( ${#algorithms[@]} == 0 )); then algorithms=(bfs scipy greedy); fi
     read -r -p 'Execucoes por algoritmo e entrada; o grafico mostra a mediana [1]: ' repetitions || return 0
     read -r -p 'Escala Y: auto, linear ou log [auto]: ' scale || return 0
+    read -r -p 'Adicionar fits Big O? [s/N]: ' fit || return 0
+    case "$fit" in
+        s|S|sim|SIM|y|Y|yes)
+            read -r -p 'Metodo: log-baseline (atual) ou ms (anterior) [log-baseline]: ' fit_method || return 0
+            case "${fit_method:-log-baseline}" in
+                log-baseline|ms) fit_options=(--fit-big-o --metodo-fit "${fit_method:-log-baseline}") ;;
+                *) echo 'Metodo invalido: use log-baseline ou ms.'; return 1 ;;
+            esac
+            ;;
+        ''|n|N|nao|NAO|não|no) ;;
+        *) echo 'Resposta invalida: use s ou n.'; return 1 ;;
+    esac
     read -r -p 'Saida .png, .svg ou .pdf [resultados/comparacao.png]: ' output || return 0
     run_comparison --fonte "${source:-banco}" --entradas "${sizes[@]}" \
         --algoritmos "${algorithms[@]}" --repeticoes "${repetitions:-1}" \
-        --escala-y "${scale:-auto}" --saida "${output:-resultados/comparacao.png}"
+        --escala-y "${scale:-auto}" "${fit_options[@]}" --saida "${output:-resultados/comparacao.png}"
 }
 
 main() {

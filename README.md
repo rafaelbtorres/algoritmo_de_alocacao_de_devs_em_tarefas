@@ -128,6 +128,89 @@ extensão de `--saida`, sem precisar de interface gráfica.
 | `--saida CAMINHO` | Padrão: `resultados/comparacao.png`; cria as pastas necessárias e substitui o gráfico anterior e o JSON de medições de mesmo nome. |
 | `--escala-y auto`, `linear` ou `log` | Padrão: `auto`; adapta o eixo Y à amplitude dos tempos. `log` usa intervalos multiplicativos, mantendo os rótulos em ms. |
 | `--repeticoes N` | Padrão: `1`; executa N vezes cada algoritmo em cada tamanho e mostra a mediana, preservando todas as amostras no JSON. |
+| `--fit-big-o` | Adiciona uma curva tracejada de ajuste do limite Big O documentado para cada algoritmo escolhido; desativado por padrão. |
+| `--metodo-fit log-baseline` ou `ms` | Com `--fit-big-o`, usa `log-baseline` por padrão; `ms` mantém o ajuste original de escala sem baseline. Independente de `--escala-y`. |
+
+#### Linhas de ajuste Big O
+
+Ative `--fit-big-o` para acrescentar **uma linha por algoritmo selecionado**, com
+a mesma cor do algoritmo e traço descontínuo. As linhas de tempos medidos
+continuam sólidas, com marcadores. A legenda abaixo do gráfico segue o formato
+`Fit - Algorithm (Big O function)`, por exemplo
+`Fit - SciPy (n² · (m + n))`. O menu 7 também pergunta se deseja ativar os fits
+e escolher entre **`log-baseline` (atual, padrão)** e **`ms` (implementação anterior)**.
+As duas implementações continuam disponíveis pela CLI:
+
+```bash
+# Atual: erros logaritmicos e baseline nao negativo.
+bash start.sh --comparar --fonte sintetico --algoritmos scipy brute \
+  --entradas 1x1 2x2 3x3 --fit-big-o --metodo-fit log-baseline
+
+# Anterior: erros quadraticos em milissegundos, sem baseline.
+bash start.sh --comparar --fonte sintetico --algoritmos scipy brute \
+  --entradas 1x1 2x2 3x3 --fit-big-o --metodo-fit ms
+```
+
+```bash
+bash start.sh --comparar --fonte sintetico --algoritmos scipy brute \
+  --entradas 1x1 2x2 3x3 4x4 --repeticoes 5 --escala-y log --fit-big-o \
+  --saida resultados/comparacao-com-fits.png
+```
+
+Os modelos usam os limites de tempo documentados no projeto:
+
+| Algoritmo | Função de referência |
+| --- | --- |
+| BFS | `n · (V + E)` |
+| SciPy | `n² · (m + n)` |
+| Greedy bweight | `E log E` |
+| Força bruta | `n · (m + 1)^n` |
+
+`n` é o número de origens, `m` o de destinos, conforme a direção configurada;
+`V = n + m` e `E` é o número **real de pares permitidos** em cada entrada.
+São aceitos recortes retangulares e restrições de compatibilidade. No caso
+quadrado, o limite do SciPy equivale a `O(n³)`, e não `O(n²)`.
+Para o Greedy, a função é estendida aos casos `E=0` e `E=1` como
+`max(1, E) · log2(max(2, E))`, para representar o custo mínimo da chamada.
+
+Por padrão, cada fit usa **log-space + baseline**, no modelo `t_ms = a + c · f`,
+com `a >= 0` e `c >= 0`. Minimiza a soma de
+`(log(t_estimado) - log(t_medido))²` sobre os pontos plotados (as medianas,
+quando há repetições). O objetivo dá influência mais equilibrada aos erros
+proporcionais em entradas pequenas e grandes. O baseline é um parâmetro
+empírico para o custo fixo; também pode absorver imperfeições do modelo e não
+é uma medição direta do overhead do computador.
+
+O método usa `scipy.optimize.least_squares`, seis inicializações determinísticas
+e uma Jacobiana analítica. Também compara as soluções de fronteira exatas
+`a=0` e `c=0`; não força um baseline positivo quando ele não melhora o ajuste.
+Com uma única entrada, ou quando `f` é constante, apenas um nível pode ser
+identificado: usa a média geométrica dos tempos e registra `c=0`, com a
+limitação explícita no JSON. Falhas de convergência são reportadas, sem troca
+silenciosa de método. Tempos zero são rejeitados pelo método logarítmico, sem
+substituição por epsilon; as medições ficam preservadas no JSON para inspeção.
+
+Use `--metodo-fit ms` para o ajuste original `t_ms = c · f`, minimizando os erros
+quadráticos em milissegundos, sem baseline. Esse método aceita tempos zero.
+Nenhum método altera o expoente, descarta pontos ou executa os solvers novamente.
+A escolha do método de fit é **independente de `--escala-y`**: o mesmo ajuste
+é mostrado tanto no gráfico linear quanto no logarítmico.
+
+Internamente, `f` é normalizada pelo maior `log(f)` para evitar overflow. O
+JSON registra em `ajustes_big_o` o método, baseline, escala, normalização,
+previsões, erro RMS em ms, erro RMS logarítmico, fator médio de erro
+multiplicativo e informações de convergência. O modelo normalizado é
+`t_ms = baseline_ms + escala_ms · exp(log(f) - log_normalizador)`.
+As medições são salvas antes do ajuste e da renderização, preservando os
+resultados mesmo se o fit ou a exportação não puderem terminar.
+
+Essas curvas são **referências assintóticas com escala ajustada**, não uma prova
+da complexidade observada nem uma previsão de desempenho. Um limite de pior
+caso pode acompanhar mal um conjunto específico de medições, especialmente
+com entradas pequenas. O baseline pode melhorar os primeiros pontos, mas não
+corrige a diferença de forma entre um limite conservador e o crescimento real.
+O ajuste não é obrigado a acompanhar todos os pontos, nem a formar uma curva
+superior a todas as medições. Com uma entrada, não há informação de crescimento.
 
 Os tamanhos informados substituem `quantidade_devs` e `quantidade_tarefas`
 do JSON somente nesta execução. Na fonte `banco`, os participantes são os
