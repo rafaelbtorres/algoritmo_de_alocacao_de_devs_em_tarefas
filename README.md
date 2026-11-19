@@ -135,10 +135,11 @@ extensão de `--saida`, sem precisar de interface gráfica.
 
 Ative `--fit-big-o` para acrescentar **uma linha por algoritmo selecionado**, com
 a mesma cor do algoritmo e traço descontínuo. As linhas de tempos medidos
-continuam sólidas, com marcadores. A legenda abaixo do gráfico segue o formato
-`Fit - Algorithm (Big O function)`, por exemplo
-`Fit - SciPy (n² · (m + n))`. O menu 7 também pergunta se deseja ativar os fits
-e escolher entre **`log-baseline` (atual, padrão)** e **`ms` (implementação anterior)**.
+continuam sólidas, com marcadores. A legenda abaixo do gráfico mostra a equação
+ajustada em milissegundos, com coeficientes arredondados, por exemplo
+`Fit - SciPy [4.259e-06(n² · (m + n)) + 0.001214]`.
+O menu 7 também pergunta se deseja ativar os fits e escolher entre
+**`log-baseline` (atual, padrão)** e **`ms` (implementação anterior)**.
 As duas implementações continuam disponíveis pela CLI:
 
 ```bash
@@ -201,6 +202,8 @@ JSON registra em `ajustes_big_o` o método, baseline, escala, normalização,
 previsões, erro RMS em ms, erro RMS logarítmico, fator médio de erro
 multiplicativo e informações de convergência. O modelo normalizado é
 `t_ms = baseline_ms + escala_ms · exp(log(f) - log_normalizador)`.
+A equação da legenda usa a função de crescimento `f` diretamente, com
+multiplicador `escala_ms · exp(-log_normalizador)` e o mesmo baseline.
 As medições são salvas antes do ajuste e da renderização, preservando os
 resultados mesmo se o fit ou a exportação não puderem terminar.
 

@@ -116,6 +116,19 @@ def resolve_y_scale(cases, algorithms, scale, extra_values=()):
     return scale
 
 
+def _format_raw_fit_scale(scale, log_normalizer):
+    if scale == 0:
+        return '0'
+    log_scale = math.log(scale) - log_normalizer
+    if log_scale >= math.log(sys.float_info.min):
+        return f'{math.exp(log_scale):.6g}'
+
+    # O coeficiente de uma funcao exponencial pode ser menor que um float.
+    exponent, remainder = divmod(log_scale, math.log(10))
+    mantissa, shift = f'{math.exp(remainder):.5e}'.split('e')
+    return f'{mantissa}e{int(exponent) + int(shift)}'
+
+
 def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=1, fits=None):
     """Exporta sem display, inclusive no container, com legenda abaixo dos eixos."""
     from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -153,8 +166,13 @@ def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=
                   solid_capstyle='round', solid_joinstyle='round', zorder=3)
         if algorithm in fits:
             fit = fits[algorithm]
+            growth = fit.get('extensao_casos_pequenos', fit['funcao'])
+            growth = growth.replace(' * ', ' · ').replace('log2', 'log₂')
+            coefficient = _format_raw_fit_scale(fit['escala_ms'], fit['log_normalizador'])
+            baseline = fit.get('baseline_ms', 0.0)
+            fit_label = f'Fit - {label} [{coefficient}({growth}) + {baseline:.6g}]'
             axis.plot(positions, fit['valores_ms'],
-                      label=f"Fit - {label} ({fit['funcao']})", color=color,
+                      label=fit_label, color=color,
                       linestyle=(0, (5, 3)), linewidth=1.8, alpha=.8, zorder=2)
     axis.set_xticks(positions, [case['entrada'] for case in cases],
                     rotation=45 if len(cases) > 10 else 0)
