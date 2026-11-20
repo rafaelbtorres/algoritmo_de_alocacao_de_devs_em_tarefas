@@ -270,10 +270,10 @@ comparison_menu() {
     read -r -p 'Adicionar fits Big O? [s/N]: ' fit || return 0
     case "$fit" in
         s|S|sim|SIM|y|Y|yes)
-            read -r -p 'Metodo: log-baseline (atual) ou ms (anterior) [log-baseline]: ' fit_method || return 0
+            read -r -p 'Metodo: log-baseline, ms ou log-growth [log-baseline]: ' fit_method || return 0
             case "${fit_method:-log-baseline}" in
-                log-baseline|ms) fit_options=(--fit-big-o --metodo-fit "${fit_method:-log-baseline}") ;;
-                *) echo 'Metodo invalido: use log-baseline ou ms.'; return 1 ;;
+                log-baseline|ms|log-growth) fit_options=(--fit-big-o --metodo-fit "${fit_method:-log-baseline}") ;;
+                *) echo 'Metodo invalido: use log-baseline, ms ou log-growth.'; return 1 ;;
             esac
             ;;
         ''|n|N|nao|NAO|não|no) ;;

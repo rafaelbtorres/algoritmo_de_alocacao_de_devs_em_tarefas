@@ -2,11 +2,9 @@
 import math
 
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import least_squares, minimize_scalar
 
 from app.matching import ALGORITHM_TIME_COMPLEXITIES
-
-FIT_METHODS = ('log-baseline', 'ms')
 
 
 def _problem(case, algorithm, direction):
@@ -61,8 +59,74 @@ def _fit_ms(log_basis, times):
     }
 
 
+def _fit_log_growth(log_basis, times):
+    """Ajusta tempos e crescimento em log, com uma ancora no maior f."""
+    if any(value <= 0 for value in times):
+        raise ValueError('O fit log-growth exige tempos maiores que zero; use --metodo-fit ms para tempos zero.')
+    log_x = np.asarray(log_basis, dtype=float)
+    log_times = np.log(np.asarray(times, dtype=float))
+    last_times = sorted(time for value, time in zip(log_basis, times) if value == 0)
+    lower = last_times[(len(last_times) - 1) // 2]
+    upper = last_times[len(last_times) // 2]
+    anchor = lower + (upper - lower) / 2
+    log_anchor = math.log(anchor)
+    _, first, groups, counts = np.unique(log_x, return_index=True, return_inverse=True, return_counts=True)
+    if len(first) == 1:
+        return {
+            'baseline_ms': anchor, 'escala_ms': 0.0, 'valores_ms': [anchor] * len(times),
+            'ancora_ms': anchor,
+            'otimizacao': {'sucesso': True, 'solucao': 'nivel_constante', 'avaliacoes': 0,
+                           'parametros_identificaveis': 1},
+        }
+
+    # Para q = b / ancora, a previsao normalizada e ancora * ((1-q)*x + q).
+    # Isso impoe a ancora em x=1 e deixa apenas q para ajustar.
+    observed_growth = np.diff(np.bincount(groups, weights=log_times) / counts)
+
+    def objective(log_fraction):
+        scale_fraction = -math.expm1(log_fraction)
+        log_scale = math.log(scale_fraction) if scale_fraction else -math.inf
+        log_predictions = log_anchor + np.logaddexp(log_scale + log_x, log_fraction)
+        errors = log_predictions - log_times
+        growth_errors = np.diff(log_predictions[first]) - observed_growth
+        return float(np.mean(np.where(errors > 0, 2., 1.) * errors ** 2)
+                     + 2 * np.mean(growth_errors ** 2))
+
+    # Busca em log para resolver baselines muito menores que a ancora.
+    # Refina os minimos locais da malha e compara com a fronteira b=0.
+    grid = np.linspace(float(log_times.min()) - log_anchor - 20, 0, 901)
+    costs = np.array([objective(value) for value in grid])
+    best = int(np.argmin(costs))
+    candidates = [(costs[best], grid[best]), (objective(-math.inf), -math.inf)]
+    evaluations = len(grid) + 1
+    minima = np.flatnonzero(((costs[1:-1] < costs[:-2]) & (costs[1:-1] <= costs[2:]))
+                           | ((costs[1:-1] <= costs[:-2]) & (costs[1:-1] < costs[2:]))) + 1
+    bounds = [(grid[index - 1], grid[index + 1]) for index in minima]
+    bounds.append((grid[-2], grid[-1]))
+    for interval in bounds:
+        result = minimize_scalar(objective, bounds=interval,
+                                 method='bounded', options={'xatol': 1e-12})
+        evaluations += result.nfev
+        if result.success:
+            candidates.append((result.fun, result.x))
+    _, log_fraction = min(candidates)
+
+    baseline = math.exp(log_anchor + log_fraction) if log_fraction < 0 else anchor
+    coefficient = anchor * -math.expm1(log_fraction)
+    log_scale = math.log(coefficient) if coefficient else -math.inf
+    predictions = [anchor if value == 0 else baseline + math.exp(log_scale + value) for value in log_basis]
+    if any(value == 0 for value in predictions):
+        raise ValueError('As previsoes log-growth estao abaixo da precisao numerica.')
+    return {
+        'baseline_ms': baseline, 'escala_ms': coefficient, 'valores_ms': predictions,
+        'ancora_ms': anchor,
+        'otimizacao': {'sucesso': True, 'solucao': 'ancorado', 'avaliacoes': evaluations,
+                       'parametros_identificaveis': 2},
+    }
+
+
 def _fit_log_baseline(log_basis, times):
-    """Minimiza erros logaritmicos de a + b*exp(log_basis), com a,b >= 0.
+    """Ajusta a*exp(log_basis) + b em log, com a,b >= 0.
 
     Procura o interior a,b>0 com seis inicializacoes deterministicas e compara
     tambem as duas fronteiras exatas a=0 e b=0. Nao adiciona epsilon aos tempos.
@@ -71,14 +135,9 @@ def _fit_log_baseline(log_basis, times):
         raise ValueError('O fit log-baseline exige tempos maiores que zero; use --metodo-fit ms para tempos zero.')
     x = np.asarray(log_basis, dtype=float)
     log_times = np.log(np.asarray(times, dtype=float))
-    mean_log_time = float(np.mean(log_times))
-    constant = {
-        'log_predictions': np.full_like(log_times, mean_log_time),
-        'log_baseline': mean_log_time, 'log_scale': None, 'solucao': 'escala_zero', 'avaliacoes': 0,
-    }
-    constant['cost'] = float(np.sum((constant['log_predictions'] - log_times) ** 2))
+    log_level = float(np.mean(log_times))
     if len(times) == 1 or np.all(x == x[0]):
-        level = math.exp(mean_log_time)
+        level = math.exp(log_level)
         return {
             'baseline_ms': level, 'escala_ms': 0.0, 'valores_ms': [level] * len(times),
             'otimizacao': {
@@ -87,7 +146,11 @@ def _fit_log_baseline(log_basis, times):
                 'mensagem': 'Uma entrada ou funcao constante: apenas um nivel pode ser identificado; escala definida como zero.',
             },
         }
-    candidates = [constant]
+    constant_predictions = np.full_like(log_times, log_level)
+    candidates = [{
+        'log_predictions': constant_predictions, 'log_baseline': log_level, 'log_scale': None,
+        'cost': float(np.sum((constant_predictions - log_times) ** 2)), 'solucao': 'escala_zero', 'avaliacoes': 0,
+    }]
     log_scale = float(np.mean(log_times - x))
     scale_predictions = log_scale + x
     candidates.append({
@@ -143,6 +206,14 @@ def _fit_log_baseline(log_basis, times):
     }
 
 
+_FIT_IMPLEMENTATIONS = {
+    'log-baseline': (_fit_log_baseline, 'minimos_quadrados_log_com_baseline'),
+    'ms': (_fit_ms, 'minimos_quadrados_em_ms_sem_intercepto'),
+    'log-growth': (_fit_log_growth, 'minimos_quadrados_log_assimetricos_com_crescimento_ancorado'),
+}
+FIT_METHODS = tuple(_FIT_IMPLEMENTATIONS)
+
+
 def fit_complexities(cases, algorithms, direction='devs_para_tarefas', method='log-baseline'):
     """Ajusta baseline/escala, mantendo a funcao Big O e seu expoente fixos.
 
@@ -150,11 +221,12 @@ def fit_complexities(cases, algorithms, direction='devs_para_tarefas', method='l
     de parametros sao independentes da escala visual linear/log dos eixos.
     """
     if method not in FIT_METHODS:
-        raise ValueError('Metodo de fit deve ser log-baseline ou ms.')
+        raise ValueError(f"Metodo de fit deve ser um de: {', '.join(FIT_METHODS)}.")
     if not cases or not algorithms:
         raise ValueError('O fit exige pelo menos uma entrada e um algoritmo.')
     if direction not in ('devs_para_tarefas', 'tarefas_para_devs'):
         raise ValueError('Direcao invalida para os fits Big O.')
+    fit_model, objective = _FIT_IMPLEMENTATIONS[method]
     fits = {}
     for algorithm in algorithms:
         if algorithm not in ALGORITHM_TIME_COMPLEXITIES:
@@ -166,8 +238,7 @@ def fit_complexities(cases, algorithms, direction='devs_para_tarefas', method='l
         logs = [_log_growth(algorithm, problem) for problem in problems]
         normalization = max(logs)
         log_basis = [value - normalization for value in logs]
-        parameters = (_fit_log_baseline(log_basis, times) if method == 'log-baseline'
-                      else _fit_ms(log_basis, times))
+        parameters = fit_model(log_basis, times)
         predictions = parameters['valores_ms']
         if (not math.isfinite(parameters['escala_ms']) or not math.isfinite(parameters['baseline_ms'])
                 or any(not math.isfinite(value) for value in predictions)):
@@ -177,8 +248,7 @@ def fit_complexities(cases, algorithms, direction='devs_para_tarefas', method='l
             'complexidade_tempo': complexity,
             'funcao': complexity[2:-1],
             'metodo_fit': method,
-            'metodo': ('minimos_quadrados_log_com_baseline' if method == 'log-baseline'
-                       else 'minimos_quadrados_em_ms_sem_intercepto'),
+            'metodo': objective,
             'modelo_normalizado': 't_ms = baseline_ms + escala_ms * exp(log(f) - log_normalizador)',
             **parameters,
             'log_normalizador': normalization,

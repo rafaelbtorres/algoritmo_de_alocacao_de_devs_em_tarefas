@@ -129,7 +129,7 @@ extensão de `--saida`, sem precisar de interface gráfica.
 | `--escala-y auto`, `linear` ou `log` | Padrão: `auto`; adapta o eixo Y à amplitude dos tempos. `log` usa intervalos multiplicativos, mantendo os rótulos em ms. |
 | `--repeticoes N` | Padrão: `1`; executa N vezes cada algoritmo em cada tamanho e mostra a mediana, preservando todas as amostras no JSON. |
 | `--fit-big-o` | Adiciona uma curva tracejada de ajuste do limite Big O documentado para cada algoritmo escolhido; desativado por padrão. |
-| `--metodo-fit log-baseline` ou `ms` | Com `--fit-big-o`, usa `log-baseline` por padrão; `ms` mantém o ajuste original de escala sem baseline. Independente de `--escala-y`. |
+| `--metodo-fit log-baseline`, `ms` ou `log-growth` | Com `--fit-big-o`, usa `log-baseline` por padrão. `ms` ajusta a escala em milissegundos e `log-growth` ajusta em log com âncora no maior valor da função de crescimento. Independe de `--escala-y`. |
 
 #### Linhas de ajuste Big O
 
@@ -138,18 +138,20 @@ a mesma cor do algoritmo e traço descontínuo. As linhas de tempos medidos
 continuam sólidas, com marcadores. A legenda abaixo do gráfico mostra a equação
 ajustada em milissegundos, com coeficientes arredondados, por exemplo
 `Fit - SciPy [4.259e-06(n² · (m + n)) + 0.001214]`.
-O menu 7 também pergunta se deseja ativar os fits e escolher entre
-**`log-baseline` (atual, padrão)** e **`ms` (implementação anterior)**.
-As duas implementações continuam disponíveis pela CLI:
+O menu 7 e a CLI oferecem três métodos de ajuste.
 
 ```bash
-# Atual: erros logaritmicos e baseline nao negativo.
+# Padrao: erros logaritmicos e baseline nao negativo.
 bash start.sh --comparar --fonte sintetico --algoritmos scipy brute \
   --entradas 1x1 2x2 3x3 --fit-big-o --metodo-fit log-baseline
 
-# Anterior: erros quadraticos em milissegundos, sem baseline.
+# Erros quadraticos em milissegundos, sem baseline.
 bash start.sh --comparar --fonte sintetico --algoritmos scipy brute \
   --entradas 1x1 2x2 3x3 --fit-big-o --metodo-fit ms
+
+# Ajuste em log com ancora no maior valor da funcao de crescimento.
+bash start.sh --comparar --fonte sintetico --algoritmos scipy brute \
+  --entradas 1x1 2x2 3x3 --fit-big-o --metodo-fit log-growth
 ```
 
 ```bash
@@ -174,8 +176,8 @@ quadrado, o limite do SciPy equivale a `O(n³)`, e não `O(n²)`.
 Para o Greedy, a função é estendida aos casos `E=0` e `E=1` como
 `max(1, E) · log2(max(2, E))`, para representar o custo mínimo da chamada.
 
-Por padrão, cada fit usa **log-space + baseline**, no modelo `t_ms = a + c · f`,
-com `a >= 0` e `c >= 0`. Minimiza a soma de
+Por padrão, cada fit usa **log-space + baseline**, no modelo `t_ms = a · f + b`,
+com `a >= 0` e `b >= 0`. Minimiza a soma de
 `(log(t_estimado) - log(t_medido))²` sobre os pontos plotados (as medianas,
 quando há repetições). O objetivo dá influência mais equilibrada aos erros
 proporcionais em entradas pequenas e grandes. O baseline é um parâmetro
@@ -184,15 +186,29 @@ empírico para o custo fixo; também pode absorver imperfeições do modelo e n�
 
 O método usa `scipy.optimize.least_squares`, seis inicializações determinísticas
 e uma Jacobiana analítica. Também compara as soluções de fronteira exatas
-`a=0` e `c=0`; não força um baseline positivo quando ele não melhora o ajuste.
+`a=0` e `b=0`; não força um baseline positivo quando ele não melhora o ajuste.
 Com uma única entrada, ou quando `f` é constante, apenas um nível pode ser
-identificado: usa a média geométrica dos tempos e registra `c=0`, com a
+identificado: usa a média geométrica dos tempos e registra `a=0`, com a
 limitação explícita no JSON. Falhas de convergência são reportadas, sem troca
 silenciosa de método. Tempos zero são rejeitados pelo método logarítmico, sem
 substituição por epsilon; as medições ficam preservadas no JSON para inspeção.
 
-Use `--metodo-fit ms` para o ajuste original `t_ms = c · f`, minimizando os erros
+Use `--metodo-fit ms` para o ajuste original `t_ms = a · f`, minimizando os erros
 quadráticos em milissegundos, sem baseline. Esse método aceita tempos zero.
+
+Use `--metodo-fit log-growth` para ajustar `t_ms = a · f + b` com `a >= 0`
+e `b >= 0`. A curva passa pelo tempo medido no maior valor de `f`. Em caso
+de empate, usa a mediana dos tempos dessas entradas. O JSON registra esse
+valor em `ancora_ms`. Com um único valor de `f`, a curva é constante.
+
+O ajuste escolhe `b` e calcula `a` a partir da âncora. O objetivo soma a
+média dos erros quadráticos em log, com peso 2 para superestimativas e 1
+para subestimativas, a duas vezes a média do erro quadrático de crescimento.
+O crescimento é a diferença entre log-tempos em valores consecutivos de
+`f`, em ordem crescente. Entradas com o mesmo `f` usam a média dos log-tempos
+nessa comparação. Para tempos zero, use `ms`.
+[Newey e Powell sobre mínimos quadrados assimétricos](https://www.princeton.edu/~erp/ERParchives/archivepdfs/M325.pdf)
+
 Nenhum método altera o expoente, descarta pontos ou executa os solvers novamente.
 A escolha do método de fit é **independente de `--escala-y`**: o mesmo ajuste
 é mostrado tanto no gráfico linear quanto no logarítmico.

@@ -225,6 +225,8 @@ def plot_benchmark(cases, algorithms, source, output, scale='auto', repetitions=
         note = 'Linhas tracejadas: limites Big O ajustados; não comprovam a complexidade observada.'
         if all(fit.get('metodo_fit') == 'log-baseline' for fit in fits.values()):
             note = 'Fits log-space + baseline: referências Big O, não comprovação de complexidade.'
+        elif all(fit.get('metodo_fit') == 'log-growth' for fit in fits.values()):
+            note = 'Ajuste em log ancorado no maior valor da função de crescimento.'
     figure.text(.065, .79, note,
                 fontsize=8, color=muted, fontfamily='DejaVu Sans')
     figure.legend(*axis.get_legend_handles_labels(), loc='lower center',
@@ -274,7 +276,8 @@ def build_parser():
     parser.add_argument('--fit-big-o', action='store_true',
                         help='Adiciona fits Big O com objetivo logaritmico e baseline por padrao')
     parser.add_argument('--metodo-fit', choices=FIT_METHODS,
-                        help='Metodo dos fits: log-baseline (padrao) ou ms (ajuste original sem baseline); exige --fit-big-o')
+                        help='Metodo dos fits: log-baseline (padrao), ms (sem intercepto) ou log-growth '
+                             '(ajuste em log com ancora no maior valor da funcao); exige --fit-big-o')
     parser.add_argument('-s', '--sprints', type=positive_integer, help='Limite de sprints, somente na fonte banco')
     parser.add_argument('-p', '--projetos', type=positive_integer, help='Limite de projetos, somente na fonte banco')
     return parser
